@@ -5,12 +5,21 @@ class DataHandler {
         const cleaned = input.trim();
 
         // Detect format
-        if (cleaned.includes('\t') || cleaned.includes(',')) {
-            return this.parseCSV(cleaned);
-        } else {
-            // Assume vertical block format (from user sample)
-            return this.parseVerticalBlocks(cleaned);
+        // 1. New Ledger Format: Starts with NSE/BSE and uses Tabs on the first line
+        const firstLine = cleaned.split('\n')[0].trim();
+        if ((firstLine.startsWith('NSE') || firstLine.startsWith('BSE')) && firstLine.includes('\t')) {
+            return this.parseLedgerFormat(cleaned);
         }
+
+        // 2. CSV/TSV with potential headers
+        if (cleaned.includes('\t') || cleaned.includes(',')) {
+            // Check if it really has headers we recognize
+            const trades = this.parseCSV(cleaned);
+            if (trades.length > 0) return trades;
+        }
+
+        // 3. Fallback: Vertical block format (legacy)
+        return this.parseVerticalBlocks(cleaned);
     }
 
     static parseCSV(text) {
@@ -49,8 +58,70 @@ class DataHandler {
         return trades;
     }
 
+    static parseLedgerFormat(text) {
+        // User specific format handler: Tab-separated values starting with Exchange
+        // Format: NSE/BSE <TAB> Date <TAB> Symbol <TAB> Type <TAB> Side <TAB> Qty <TAB> Price ...
+
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+        const trades = [];
+
+        for (const line of lines) {
+            // Check if line looks like the new format
+            // Sample: NSE	06/10/2025	ICICIBANK	D	B	250	1363.40 ...
+
+            // Heuristic: Must start with NSE or BSE
+            if (!line.startsWith('NSE') && !line.startsWith('BSE')) continue;
+
+            const parts = line.split(/\t+/); // Split by tabs
+            if (parts.length < 7) continue; // Need at least up to Price
+
+            try {
+                // Mapping based on user provided sample
+                const exch = parts[0];
+                const date = parts[1];
+                const symbol = parts[2];
+                const typeCode = parts[3];
+                const sideCode = parts[4];
+                const qty = parseFloat(parts[5]);
+                const price = parseFloat(parts[6]);
+
+                // Net Rate is usually at index 8 in this specific export
+                let netRate = price;
+                if (parts[8] && !isNaN(parseFloat(parts[8]))) {
+                    netRate = parseFloat(parts[8]);
+                }
+
+                // Calculate implicit costs per share
+                let expenses = 0;
+                if (sideCode === 'B') {
+                    expenses = Math.max(0, netRate - price);
+                } else {
+                    expenses = Math.max(0, price - netRate);
+                }
+
+                // Safety check
+                if (isNaN(qty) || isNaN(price)) continue;
+
+                trades.push({
+                    date: date, // Keep original string format, Utils or Calculator will parse it
+                    symbol: symbol,
+                    side: sideCode === 'B' ? 'BUY' : 'SELL',
+                    qty: qty,
+                    price: price,
+                    expenses: expenses,
+                    orderType: typeCode === 'D' ? 'MTF' : 'MIS' // Assuming D=Delivery/MTF, T=Trade/Intraday? User said D is what they care about usually
+                });
+
+            } catch (e) {
+                console.warn("Skipping malformed line:", line, e);
+            }
+        }
+
+        return trades;
+    }
+
     static parseVerticalBlocks(text) {
-        // User specific format handler
+        // Legacy vertical block format
         // Expecting specific sequence like: Exch, Date, Symbol, Type, Side, Qty, Price...
 
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
@@ -72,7 +143,6 @@ class DataHandler {
 
                         let netPrice = price;
                         // Try to peek ahead for Net Rate (i+8)
-                        // Pattern: Qty(5), Price(6), Brok(7), NetRate(8)
                         if (lines[i + 8] && !isNaN(parseFloat(lines[i + 8]))) {
                             netPrice = parseFloat(lines[i + 8]);
                         }
