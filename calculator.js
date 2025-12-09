@@ -139,18 +139,24 @@ class Calculator {
                     const sellExp = matchedQty * sellExpensesPerUnit;
 
                     // --- INTEREST CALCULATION (Realized) ---
-                    const daysHeld = Math.max(0, Math.round((trade.date - matchLeg.date) / (24 * 60 * 60 * 1000)));
+                    let daysHeld = Math.round((trade.date - matchLeg.date) / (24 * 60 * 60 * 1000));
+                    if (isNaN(daysHeld)) daysHeld = 0; // Guard against invalid dates
+                    daysHeld = Math.max(0, daysHeld);
+
                     const annualRate = CONFIG.mtfInterestRate;
                     const fundedRatio = configOverrides.fundedRatio || 1.0;
 
                     const legDebit = buyCost + buyExp; // Total cost to be funded
                     const legLoan = legDebit * fundedRatio;
-                    const interest = legLoan * (annualRate / 365) * daysHeld;
+
+                    let interest = legLoan * (annualRate / 365) * daysHeld;
+                    if (isNaN(interest)) interest = 0;
 
                     // --- NET P&L ---
                     // Gross P&L = Sold Value - Buy Cost - Buy Expenses - Sell Expenses
                     const grossPnl = sellVal - buyCost - buyExp - sellExp;
-                    const netPnl = grossPnl - interest;
+                    let netPnl = grossPnl - interest;
+                    if (isNaN(netPnl)) netPnl = 0;
 
                     pos.realizedPnL += netPnl;
 
@@ -167,7 +173,7 @@ class Calculator {
                         sellDate: trade.date,
                         sellPrice: trade.price,
                         grossPnl: grossPnl,
-                        netPnl: netPnl,
+                        pnl: netPnl, // Renamed from netPnl to matches Components.js expectation
                         daysHeld: daysHeld,
                         interest: interest,
                         type: 'MTF'
@@ -205,11 +211,13 @@ class Calculator {
 
                     // Independent Interest Calculation per Lot
                     let daysHeld = Math.round((today - leg.date) / oneDay) - interestDelay;
+                    if (isNaN(daysHeld)) daysHeld = 0;
                     daysHeld = Math.max(0, daysHeld);
-
                     const legDebit = (leg.qty * leg.price) + leg.charges;
                     const legLoan = legDebit * fundedRatio;
-                    const legInterest = legLoan * (annualRate / 365) * daysHeld;
+
+                    let legInterest = legLoan * (annualRate / 365) * daysHeld;
+                    if (isNaN(legInterest)) legInterest = 0;
 
                     totalInterest += legInterest;
 
@@ -227,6 +235,13 @@ class Calculator {
                 // Effective Average Price includes the charges paid!
                 const effectiveAvgPrice = (totalCostClean + totalCharges) / totalQty;
 
+                // Total Daily Interest for this position
+                const totalDailyInterest = p.buyQueue.reduce((sum, leg) => {
+                    const legDebit = (leg.qty * leg.price) + leg.charges;
+                    const legLoan = legDebit * fundedRatio;
+                    return sum + (legLoan * (annualRate / 365));
+                }, 0);
+
                 // For Breakeven calc, we pass the pre-calculated total interest
                 const breakeven = this.calculateBreakeven(
                     totalCostClean,
@@ -242,6 +257,7 @@ class Calculator {
                     avgPrice: effectiveAvgPrice,
                     buyDate: oldestDate,
                     daysHeld: Math.round((today - oldestDate) / oneDay), // Oldest days
+                    dailyInterest: totalDailyInterest, // New field
                     legs: detailedLegs,
                     ...breakeven
                 });

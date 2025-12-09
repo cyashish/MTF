@@ -11,7 +11,7 @@ class Components {
         return dateObj.toLocaleDateString('en-GB'); // DD/MM/YYYY
     }
 
-    static renderTable(positions, containerId, customTarget = 10) {
+    static renderTable(positions, containerId, customTarget = 10, sortConfig = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
@@ -20,15 +20,20 @@ class Components {
             return;
         }
 
+        const getSortArrow = (key) => {
+            if (!sortConfig || sortConfig.key !== key) return '';
+            return sortConfig.dir === 'asc' ? ' ▲' : ' ▼';
+        };
+
         let html = `
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 250px;">Symbol</th>
+                        <th style="width: 250px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Qty</th>
                         <th class="num">Avg Buy</th>
-                        <th class="num">Interest</th>
-                        <th class="num">Days</th>
+                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'interestAmount')">Interest${getSortArrow('interestAmount')}</th>
+                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'daysHeld')">Days${getSortArrow('daysHeld')}</th>
                         <th class="num" style="color: var(--warning)">Breakeven</th>
                         <th class="num" style="color: var(--success)">Target 1%</th>
                         <th class="num" style="color: var(--success)">Target 2%</th>
@@ -130,6 +135,7 @@ class Components {
     static renderSummary(positions) {
         const totalCapital = positions.reduce((sum, p) => sum + (p.qty * p.avgPrice), 0);
         const totalInterest = positions.reduce((sum, p) => sum + p.interestAmount, 0);
+        const totalDailyInterest = positions.reduce((sum, p) => sum + (p.dailyInterest || 0), 0);
 
         return `
             <div class="grid">
@@ -145,11 +151,15 @@ class Components {
                     <div class="text-sm text-muted">Interest Accrued</div>
                     <div class="card-title" style="color: var(--warning)">${this.formatCurrency(totalInterest)}</div>
                 </div>
+                <div class="card" style="padding: 1rem;">
+                    <div class="text-sm text-muted">Daily Interest</div>
+                    <div class="card-title" style="color: var(--warning); opacity: 0.8;">${this.formatCurrency(totalDailyInterest)}</div>
+                </div>
             </div>
         `;
     }
 
-    static renderClosedTable(positions, containerId) {
+    static renderClosedTable(positions, containerId, sortConfig = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
@@ -157,6 +167,11 @@ class Components {
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">No closed positions found yet.</div>';
             return;
         }
+
+        const getSortArrow = (key) => {
+            if (!sortConfig || sortConfig.key !== key) return '';
+            return sortConfig.dir === 'asc' ? ' ▲' : ' ▼';
+        };
 
         // Calculate Total P&L
         // Calculate Total P&L and Interest
@@ -171,11 +186,11 @@ class Components {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 250px;">Symbol</th>
+                        <th style="width: 250px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Closed Qty</th>
                         <th class="num">Gross P&L</th>
-                        <th class="num">Total Interest</th>
-                        <th class="num">Net P&L</th>
+                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'totalInterest')">Total Interest${getSortArrow('totalInterest')}</th>
+                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'realizedPnL')">Net P&L${getSortArrow('realizedPnL')}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -262,7 +277,7 @@ class Components {
         container.innerHTML = html;
     }
 
-    static renderUnrealizedTable(positions, containerId) {
+    static renderUnrealizedTable(positions, containerId, sortConfig = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
@@ -270,6 +285,11 @@ class Components {
             container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-secondary);">No open positions to track.</div>';
             return;
         }
+
+        const getSortArrow = (key) => {
+            if (!sortConfig || sortConfig.key !== key) return '';
+            return sortConfig.dir === 'asc' ? ' ▲' : ' ▼';
+        };
 
         // Attach global handler for updating calculations
         window.APP.updateUnrealized = (idx, qty, avgPrice) => {
@@ -297,7 +317,7 @@ class Components {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 250px;">Symbol</th>
+                        <th style="width: 250px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('unrealized', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Qty</th>
                         <th class="num">Avg Buy</th>
                         <th class="num" style="width: 150px;">Current Price (LTP)</th>

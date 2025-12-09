@@ -9,6 +9,48 @@ const APP = {
 
         // Create global access for inline onclicks
         window.APP = this;
+
+        // Sorting State
+        this.sortState = {
+            open: { key: 'symbol', dir: 'asc' }, // Options: symbol, interestAmount, daysHeld
+            closed: { key: 'symbol', dir: 'asc' }, // Options: symbol, totalInterest, realizedPnL
+            unrealized: { key: 'symbol', dir: 'asc' } // Options: symbol
+        };
+    },
+
+    toggleSort(type, key) {
+        const current = this.sortState[type];
+        if (current.key === key) {
+            // Toggle direction
+            current.dir = current.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            current.key = key;
+            current.dir = 'asc';
+        }
+
+        // Trigger re-render with current data
+        if (window.APP_STATE && window.APP_STATE.positions) {
+            const customTarget = parseFloat(document.getElementById('customTarget')?.value || 10);
+            this.renderDashboard(window.APP_STATE.positions, window.APP_STATE.closedPositions, customTarget);
+        }
+    },
+
+    // Helper to sort list
+    sortList(list, type) {
+        const { key, dir } = this.sortState[type];
+        if (!list || list.length === 0) return [];
+
+        return [...list].sort((a, b) => {
+            let valA = a[key];
+            let valB = b[key];
+
+            // String comparison
+            if (typeof valA === 'string') {
+                return dir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }
+            // Numeric comparison
+            return dir === 'asc' ? valA - valB : valB - valA;
+        });
     },
 
     async handleProcess() {
@@ -72,9 +114,14 @@ const APP = {
         const delayInput = document.getElementById('interestDelay');
         const customTargetInput = document.getElementById('customTarget');
 
-        const fundedRatio = fundingInput ? parseFloat(fundingInput.value) : 1.0;
-        const interestDelay = delayInput ? parseInt(delayInput.value) : 0;
-        const customTarget = customTargetInput ? parseFloat(customTargetInput.value) : 10;
+        let fundedRatio = fundingInput ? parseFloat(fundingInput.value) : 1.0;
+        if (isNaN(fundedRatio)) fundedRatio = 1.0;
+
+        let interestDelay = delayInput ? parseInt(delayInput.value) : 0;
+        if (isNaN(interestDelay)) interestDelay = 0;
+
+        let customTarget = customTargetInput ? parseFloat(customTargetInput.value) : 10;
+        if (isNaN(customTarget)) customTarget = 10;
 
         const configOverrides = {
             fundedRatio,
@@ -93,16 +140,21 @@ const APP = {
     renderDashboard(openPositions, closedPositions, customTarget = 10) {
         document.getElementById('dashboard').classList.remove('hidden');
 
+        // Apply Sorting
+        const sortedOpen = this.sortList(openPositions, 'open');
+        const sortedClosed = this.sortList(closedPositions, 'closed');
+        const sortedUnrealized = this.sortList(openPositions, 'unrealized');
+
         // Render Summary (Open Positions)
-        const summaryHtml = Components.renderSummary(openPositions);
+        const summaryHtml = Components.renderSummary(openPositions); // Summary uses totals, order doesn't matter
         document.getElementById('summaryContainer').innerHTML = summaryHtml;
 
         // Render Table (Open Positions)
-        Components.renderTable(openPositions, 'tableContainer', customTarget);
+        Components.renderTable(sortedOpen, 'tableContainer', customTarget, this.sortState.open);
 
         // Render Closed Positions Table (Safe check if container exists)
         if (closedPositions && document.getElementById('closedTableContainer')) {
-            Components.renderClosedTable(closedPositions, 'closedTableContainer');
+            Components.renderClosedTable(sortedClosed, 'closedTableContainer', this.sortState.closed);
         }
 
         // Render Unrealized P&L Table (Open Positions)
@@ -112,7 +164,7 @@ const APP = {
         if (unrealizedContainer) {
             if (showUnrealized) {
                 unrealizedContainer.parentElement.classList.remove('hidden');
-                Components.renderUnrealizedTable(openPositions, 'unrealizedTableContainer');
+                Components.renderUnrealizedTable(sortedUnrealized, 'unrealizedTableContainer', this.sortState.unrealized);
             } else {
                 unrealizedContainer.parentElement.classList.add('hidden');
                 unrealizedContainer.innerHTML = ''; // a cleanup
