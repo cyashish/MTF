@@ -1,6 +1,7 @@
 const CONFIG = {
     // Defaults based on standard Indian brokerage standard
-    brokerage: 0.0004,       // 0.04%
+    // Defaults based on details provided (Delivery 0.40%)
+    brokerage: 0.004,       // 0.40%
     mtfInterestRate: 0.18,    // 18% p.a.
     sttSell: 0.001,           // 0.1% on sell value
     txnCharge: 0.0000325,     // 0.00325%

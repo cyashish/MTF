@@ -97,12 +97,78 @@ const APP = {
             const closedCount = closedPositions.length;
             status.innerHTML = `<span class="positive">Processed ${rawTrades.length} trades. Open: ${totalPos}, Closed: ${closedCount}.</span>`;
 
+            // Start Live Price Polling
+            // this.startPolling();
+
         } catch (e) {
             console.error(e);
             status.innerHTML = `<span class="negative">Error: ${e.message}</span>`;
         } finally {
             btn.disabled = false;
             spinner.classList.add('hidden');
+        }
+    },
+
+    // Live Price Polling
+    startPolling() {
+        if (this.pollingInterval) clearInterval(this.pollingInterval);
+
+        // Initial Fetch
+        this.fetchAllPrices();
+
+        // Poll every hour (3600000 ms)
+        this.pollingInterval = setInterval(() => {
+            this.fetchAllPrices();
+        }, 3600000);
+    },
+
+    async fetchAllPrices() {
+        if (!window.APP_STATE.positions) return;
+
+        console.log("Fetching live prices...");
+        const status = document.getElementById('statusMsg');
+        const originalText = status.textContent;
+        status.textContent = "Fetching live prices...";
+
+        let updatedCount = 0;
+
+        // Use a map to store prices to avoid refetching same symbol multiple times
+        const priceMap = new Map();
+
+        // Unique symbols
+        const symbols = [...new Set(window.APP_STATE.positions.map(p => p.symbol))];
+
+        for (const sym of symbols) {
+            const price = await DataHandler.fetchPrice(sym);
+            if (price !== null && price > 0) {
+                priceMap.set(sym, price);
+                updatedCount++;
+            }
+        }
+
+        // Update positions with new price
+        window.APP_STATE.positions.forEach((pos, idx) => {
+            if (priceMap.has(pos.symbol)) {
+                // Determine which Input ID this position corresponds to in the rendered table
+                // Note: The table rendering might change order if sorted.
+                // Best approach: Add 'currentPrice' to position object and re-render OR update DOM.
+                // Updating DOM is smoother if user is typing, but re-render is safer for consistency.
+                pos.currentPrice = priceMap.get(pos.symbol);
+            }
+        });
+
+        if (updatedCount > 0) {
+            console.log(`Updated prices for ${updatedCount} symbols.`);
+            status.textContent = `Updated prices for ${updatedCount} symbols.`;
+
+            // Re-render (preserving sort)
+            this.renderDashboard(window.APP_STATE.positions, window.APP_STATE.closedPositions, document.getElementById('customTarget')?.value || 10);
+
+            setTimeout(() => {
+                status.textContent = originalText;
+            }, 3000);
+        } else {
+            status.textContent = originalText; // revert silently if nothing found
         }
     },
 
@@ -130,6 +196,17 @@ const APP = {
         };
 
         const { openPositions, closedPositions } = Calculator.processTrades(window.APP_STATE.rawTrades, configOverrides);
+
+        // PRESERVE Fetched Prices if they exist in old state
+        if (window.APP_STATE.positions) {
+            openPositions.forEach(newPos => {
+                const oldPos = window.APP_STATE.positions.find(p => p.symbol === newPos.symbol);
+                if (oldPos && oldPos.currentPrice) {
+                    newPos.currentPrice = oldPos.currentPrice;
+                }
+            });
+        }
+
         window.APP_STATE.positions = openPositions;
         window.APP_STATE.closedPositions = closedPositions;
 

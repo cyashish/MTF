@@ -35,7 +35,7 @@ class Calculator {
             side: isBuy ? 'BUY' : 'SELL',
             qty: Math.abs(parseNum(rawTrade.qty)),
             price: parseNum(rawTrade.price),
-            expenses: rawTrade.expenses || 0, // Pass through explicit expenses from file
+            expenses: rawTrade.expenses, // Pass through explicit expenses (null if missing)
             orderType: rawTrade.orderType ? rawTrade.orderType.trim().toUpperCase() : 'MTF',
             raw: rawTrade
         };
@@ -77,10 +77,24 @@ class Calculator {
 
             if (trade.side === 'BUY') {
                 // If expenses are provided (from file), use them. Else estimate.
-                let charges = trade.expenses * trade.qty;
-                if (!trade.expenses && trade.expenses !== 0) {
-                    charges = this.estimateBuyCharges(trade.qty, trade.price);
+                // Calculate Charges
+                let brokerageAmount = 0;
+
+                if (trade.expenses || trade.expenses === 0) {
+                    // File provided explicit brokerage
+                    brokerageAmount = trade.expenses * trade.qty;
+                } else {
+                    // Estimate Brokerage
+                    brokerageAmount = (trade.qty * trade.price) * CONFIG.brokerage;
+                    // Apply min/max logic if needed? For now straightforward pct
+                    // However user mentioned min 3rs or 5rs. 
+                    // Let's stick to percentage as it matches the file samples best (0.4%)
                 }
+
+                // Always add Taxes/STT on top for Accurate Breakeven
+                // (File usually contains only Base Brokerage based on analysis)
+                const taxes = this.calculateTaxesOnly(trade.qty, trade.price, brokerageAmount);
+                const charges = brokerageAmount + taxes;
 
                 pos.buyQueue.push({
                     qty: trade.qty,
@@ -194,7 +208,8 @@ class Calculator {
         const customTargetPct = configOverrides.customTarget || 10;
 
         Object.values(positions).forEach(p => {
-            if (p.totalOpenQty > 0) {
+            // Filter out small positions (< 10 qty)
+            if (p.totalOpenQty >= 10) {
                 let totalCostClean = 0; // Pure share price cost
                 let totalCharges = 0;   // Brokerage/Taxes paid
                 let totalInterest = 0;
@@ -280,17 +295,27 @@ class Calculator {
         return { openPositions: openResults, closedPositions: closedResults };
     }
 
-    static estimateBuyCharges(qty, price) {
-        // Detailed estimation for Buy Side (Delivery)
+    static calculateTaxesOnly(qty, price, brokerageAmount) {
+        // Calculates non-brokerage costs: STT, Txn, Sebi, Stamp, GST
         const turnover = qty * price;
-        const brokerage = turnover * CONFIG.brokerage;
         const stt = turnover * 0.001; // STT on Delivery Buy is 0.1%
         const txn = turnover * CONFIG.txnCharge;
         const sebi = turnover * CONFIG.sebiCharge;
         const stamp = turnover * CONFIG.stampDuty; // Stamp duty only on buy
-        const gst = (brokerage + txn + sebi) * CONFIG.gst;
 
-        return brokerage + stt + txn + sebi + stamp + gst;
+        // GST is on Brokerage + Txn + Sebi
+        const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
+
+        return stt + txn + sebi + stamp + gst;
+    }
+
+    static estimateBuyCharges(qty, price) {
+        // Detailed estimation for Buy Side (Delivery)
+        const turnover = qty * price;
+        const brokerage = turnover * CONFIG.brokerage;
+        const taxes = this.calculateTaxesOnly(qty, price, brokerage);
+
+        return brokerage + taxes;
     }
 
     static calculateBreakeven(buyValueRaw, buyCharges, totalInterest, qty, customTargetPct) {

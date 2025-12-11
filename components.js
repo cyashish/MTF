@@ -336,21 +336,34 @@ class Components {
         `;
 
         positions.forEach((pos, idx) => {
+            // Check if we have a live price
+            const currentPrice = pos.currentPrice || '';
+            const pnl = currentPrice ? (currentPrice - pos.avgPrice) * pos.qty : 0;
+            const pnlText = currentPrice ? this.formatCurrency(pnl) : '-';
+            const pnlColor = pnl >= 0 ? 'var(--success)' : 'var(--warning)';
+            const dataVal = currentPrice ? pnl : 0;
+
+            // Auto call update if we have price (to update totals)
+            // Ideally we render it correctly first
+
             html += `
                 <tr>
                     <td style="font-weight: 600;">${pos.symbol}</td>
                     <td class="num">${pos.qty}</td>
                     <td class="num">${pos.avgPrice.toFixed(2)}</td>
                     <td class="num">
-                        <input type="number" id="ltp-${idx}" placeholder="Enter Price" 
+                        <input type="number" id="ltp-${idx}" placeholder="Enter Price" value="${currentPrice}"
                             style="width: 100px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-dark); color: white; text-align: right;"
                             oninput="window.APP.updateUnrealized(${idx}, ${pos.qty}, ${pos.avgPrice})"
                         >
                     </td>
-                    <td id="pnl-${idx}" class="num" data-val="0" style="font-weight:bold;">-</td>
+                    <td id="pnl-${idx}" class="num" data-val="${dataVal}" style="font-weight:bold; color: ${currentPrice ? pnlColor : 'inherit'};">${pnlText}</td>
                 </tr>
             `;
         });
+
+        // Post-render: Update Total if we have pre-filled data
+        setTimeout(() => this.updateUnrealizedTotal(), 0);
 
         html += '</tbody></table>';
         container.innerHTML = html;

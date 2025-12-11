@@ -5,9 +5,11 @@ class DataHandler {
         const cleaned = input.trim();
 
         // Detect format
-        // 1. New Ledger Format: Starts with NSE/BSE and uses Tabs on the first line
-        const firstLine = cleaned.split('\n')[0].trim();
-        if ((firstLine.startsWith('NSE') || firstLine.startsWith('BSE')) && firstLine.includes('\t')) {
+        // 1. New Ledger Format: Starts with NSE/BSE followed by data on the same line
+        // Regex check for: Start of line -> NSE/BSE -> Whitespace -> Date/Something (not just newline)
+        const hasLedgerSignature = cleaned.split('\n').some(l => /^(NSE|BSE)\s+\S+/i.test(l.trim()));
+
+        if (hasLedgerSignature) {
             return this.parseLedgerFormat(cleaned);
         }
 
@@ -59,57 +61,82 @@ class DataHandler {
     }
 
     static parseLedgerFormat(text) {
-        // User specific format handler: Tab-separated values starting with Exchange
-        // Format: NSE/BSE <TAB> Date <TAB> Symbol <TAB> Type <TAB> Side <TAB> Qty <TAB> Price ...
+        // Robust Regex Parsing for Ledger Format
+        // Support both Tabs and Spaces. Handle Symbols with spaces.
+        // Anchors: Exch ... Type(D/T) Side(B/S) ...
 
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
         const trades = [];
 
-        for (const line of lines) {
-            // Check if line looks like the new format
-            // Sample: NSE	06/10/2025	ICICIBANK	D	B	250	1363.40 ...
+        // Regex Explanation:
+        // ^(NSE|BSE)       Group 1: Exchange
+        // \s+              Whitespace
+        // (\S+)            Group 2: Date (non-whitespace)
+        // \s+              Whitespace
+        // (.+?)            Group 3: Symbol (Lazy match until next group)
+        // \s+              Whitespace
+        // ([DT])           Group 4: Type (D or T)
+        // \s+              Whitespace
+        // ([BS])           Group 5: Side (B or S)
+        // \s+              Whitespace
+        // ([\d.,]+)        Group 6: Qty
+        // \s+              Whitespace
+        // ([\d.,]+)        Group 7: Price
+        // \s+              Whitespace
+        // (?:[\d.,]+)      Non-capturing: Intermediate col (Col 7 in sample)
+        // \s+              Whitespace
+        // ([\d.,]+)        Group 8: Net Rate (Col 8 in sample) - Optional capture
+        const pattern = /^(NSE|BSE)\s+(\S+)\s+(.+?)\s+([DT])\s+([BS])\s+([\d.,]+)\s+([\d.,]+)(?:\s+[\d.,]+)?\s+([\d.,]+)/i;
 
+        for (const line of lines) {
             // Heuristic: Must start with NSE or BSE
             if (!line.startsWith('NSE') && !line.startsWith('BSE')) continue;
 
-            const parts = line.split(/\t+/); // Split by tabs
-            if (parts.length < 7) continue; // Need at least up to Price
+            const match = line.match(pattern);
+            if (!match) {
+                // Fallback for lines that might be simpler or header-like?
+                // If it doesn't match the D/B pattern, maybe it's not a trade line.
+                continue;
+            }
 
             try {
-                // Mapping based on user provided sample
-                const exch = parts[0];
-                const date = parts[1];
-                const symbol = parts[2];
-                const typeCode = parts[3];
-                const sideCode = parts[4];
-                const qty = parseFloat(parts[5]);
-                const price = parseFloat(parts[6]);
+                const exch = match[1];
+                const date = match[2];
+                const symbol = match[3].trim();
+                const typeCode = match[4];
+                const sideCode = match[5];
+                const qty = parseFloat(match[6].replace(/,/g, ''));
+                const price = parseFloat(match[7].replace(/,/g, ''));
 
-                // Net Rate is usually at index 8 in this specific export
+                // Net Rate (Group 8)
                 let netRate = price;
-                if (parts[8] && !isNaN(parseFloat(parts[8]))) {
-                    netRate = parseFloat(parts[8]);
+                if (match[8]) {
+                    netRate = parseFloat(match[8].replace(/,/g, ''));
+                    if (isNaN(netRate)) netRate = price;
                 }
 
-                // Calculate implicit costs per share
-                let expenses = 0;
-                if (sideCode === 'B') {
-                    expenses = Math.max(0, netRate - price);
-                } else {
-                    expenses = Math.max(0, price - netRate);
+                // implicit costs calculation
+                let expenses = null;
+                // If we found a valid Net Rate different from 0
+                if (match[8]) {
+                    if (sideCode === 'B') {
+                        expenses = Math.max(0, netRate - price);
+                    } else {
+                        expenses = Math.max(0, price - netRate);
+                    }
+                    if (expenses < 0.01) expenses = null; // Treat ~0 or 0 expenses as null to trigger estimation
                 }
-
                 // Safety check
                 if (isNaN(qty) || isNaN(price)) continue;
 
                 trades.push({
-                    date: date, // Keep original string format, Utils or Calculator will parse it
+                    date: date,
                     symbol: symbol,
                     side: sideCode === 'B' ? 'BUY' : 'SELL',
                     qty: qty,
                     price: price,
                     expenses: expenses,
-                    orderType: typeCode === 'D' ? 'MTF' : 'MIS' // Assuming D=Delivery/MTF, T=Trade/Intraday? User said D is what they care about usually
+                    orderType: typeCode === 'D' ? 'MTF' : 'MIS'
                 });
 
             } catch (e) {
@@ -141,18 +168,17 @@ class DataHandler {
                         const qty = parseFloat(lines[i + 5]);     // 250
                         const price = parseFloat(lines[i + 6]);   // 1363.40
 
+                        let expenses = null;
                         let netPrice = price;
                         // Try to peek ahead for Net Rate (i+8)
                         if (lines[i + 8] && !isNaN(parseFloat(lines[i + 8]))) {
                             netPrice = parseFloat(lines[i + 8]);
-                        }
-
-                        // Calculate implicit costs per share from the file data if available
-                        let expenses = 0;
-                        if (sideCode === 'B') {
-                            expenses = Math.max(0, netPrice - price);
-                        } else {
-                            expenses = Math.max(0, price - netPrice);
+                            if (sideCode === 'B') {
+                                expenses = Math.max(0, netPrice - price);
+                            } else {
+                                expenses = Math.max(0, price - netPrice);
+                            }
+                            if (expenses === 0) expenses = null;
                         }
 
                         trades.push({
@@ -179,5 +205,57 @@ class DataHandler {
         }
 
         return trades;
+    }
+
+    // Live Price Integration
+    static async fetchPrice(symbol) {
+        try {
+            // Yahoo Finance API via AllOrigins Proxy (to bypass CORS on file://)
+            const ySymbol = `${symbol}.NS`;
+            const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ySymbol}?interval=1d&range=1d`;
+
+            // Proxy URL - This wraps the request so the browser sees a request to allorigins.win (CORS friendly)
+            const url = `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`;
+
+            const response = await fetch(url);
+
+            if (!response.ok) throw new Error("Network response was not ok");
+
+            const proxyData = await response.json();
+            // AllOrigins returns the actual response in 'contents' field as a string
+            const data = JSON.parse(proxyData.contents);
+
+            // Validate structure
+            if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+                console.warn(`Yahoo API: No data for ${ySymbol}`);
+                return null;
+            }
+
+            const meta = data.chart.result[0].meta;
+
+            // Logic:
+            // If > 3:30 PM (15:30) -> Close Price
+            // If < 3:30 PM -> Prioritize Prev Close (as requested: "before that give previous day close or day's open")
+
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMin = now.getMinutes();
+
+            const isAfterMarket = (currentHour > 15) || (currentHour === 15 && currentMin >= 30);
+
+            // Yahoo Meta Fields: regularMarketPrice, previousClose, regularMarketOpen
+            const currentPrice = meta.regularMarketPrice;
+            const prevClose = meta.previousClose;
+
+            if (isAfterMarket) {
+                return currentPrice || 0;
+            } else {
+                return prevClose || currentPrice || 0;
+            }
+
+        } catch (e) {
+            console.error(`Failed to fetch price for ${symbol}`, e);
+            return null;
+        }
     }
 }
