@@ -53,6 +53,46 @@ const APP = {
         });
     },
 
+    setUnrealizedUpdatedAt(ts = new Date()) {
+        window.APP_STATE.unrealizedUpdatedAt = ts;
+        this.updateUnrealizedTimestampLabel();
+    },
+
+    updateUnrealizedTimestampLabel() {
+        const label = document.getElementById('unrealizedUpdatedAt');
+        if (!label) return;
+
+        const ts = window.APP_STATE.unrealizedUpdatedAt || window.APP_STATE.priceMeta?.updatedAt;
+        if (!ts) {
+            label.textContent = '';
+            return;
+        }
+
+        const tz = CONFIG.marketHours.timezone || 'Asia/Kolkata';
+        const nowIst = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+        const updatedIst = new Date(new Date(ts).toLocaleString('en-US', { timeZone: tz }));
+
+        const dateStr = updatedIst.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const timeStr = updatedIst.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        // Compare only the date part in IST
+        const today = new Date(nowIst.getFullYear(), nowIst.getMonth(), nowIst.getDate());
+        const updatedDay = new Date(updatedIst.getFullYear(), updatedIst.getMonth(), updatedIst.getDate());
+        const diffDays = Math.floor((today - updatedDay) / (1000 * 60 * 60 * 24));
+
+        const closeMinutes = (CONFIG.marketHours.closeHour * 60) + CONFIG.marketHours.closeMinute;
+        const nowMinutes = (nowIst.getHours() * 60) + nowIst.getMinutes();
+
+        let statusNote = '';
+        if (diffDays >= 1) {
+            statusNote = ' — market yet to open';
+        } else if (nowMinutes >= closeMinutes) {
+            statusNote = ' — markets closed';
+        }
+
+        label.textContent = `Last updated ${dateStr} at ${timeStr} IST${statusNote}`;
+    },
+
     isMarketOpen(now = new Date()) {
         const { marketHours } = CONFIG;
         const istNow = new Date(now.toLocaleString('en-US', { timeZone: marketHours.timezone || 'Asia/Kolkata' }));
@@ -190,6 +230,7 @@ const APP = {
                 marketOpen: marketStatus.isOpen,
                 source: lastSource || (marketStatus.isOpen ? 'regularMarketPrice' : 'previousClose')
             };
+            this.setUnrealizedUpdatedAt(ts);
             const tsStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             status.textContent = `Updated prices (${lastSource || 'auto'}).`;
 
@@ -297,6 +338,7 @@ const APP = {
             if (showUnrealized) {
                 unrealizedContainer.parentElement.classList.remove('hidden');
                 Components.renderUnrealizedTable(sortedUnrealized, 'unrealizedTableContainer', this.sortState.unrealized);
+                this.updateUnrealizedTimestampLabel();
             } else {
                 unrealizedContainer.parentElement.classList.add('hidden');
                 unrealizedContainer.innerHTML = ''; // a cleanup

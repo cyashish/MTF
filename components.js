@@ -314,6 +314,8 @@ class Components {
 
                 // Store Pnl in dataset for Total Calculation
                 pnlCell.dataset.val = pnl;
+                // Track manual updates for the Unrealized table timestamp
+                window.APP?.setUnrealizedUpdatedAt?.();
             }
             Components.updateUnrealizedTotal();
         };

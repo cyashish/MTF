@@ -38,5 +38,7 @@ const CONFIG = {
 window.APP_STATE = {
     trades: [],
     positions: [],
-    processedData: null
+    processedData: null,
+    priceMeta: null,
+    unrealizedUpdatedAt: null
 };
