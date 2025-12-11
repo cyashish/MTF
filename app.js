@@ -239,8 +239,13 @@ const APP = {
         if (window.APP_STATE.positions) {
             openPositions.forEach(newPos => {
                 const oldPos = window.APP_STATE.positions.find(p => p.symbol === newPos.symbol);
-                if (oldPos && oldPos.currentPrice) {
-                    newPos.currentPrice = oldPos.currentPrice;
+                if (oldPos) {
+                    if (oldPos.currentPrice) {
+                        newPos.currentPrice = oldPos.currentPrice;
+                    }
+                    if (oldPos.priceSource) {
+                        newPos.priceSource = oldPos.priceSource;
+                    }
                 }
             });
         }
