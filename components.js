@@ -32,6 +32,7 @@ class Components {
                         <th style="width: 250px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Qty</th>
                         <th class="num">Avg Buy</th>
+                        <th class="num">Last</th>
                         <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'interestAmount')">Interest${getSortArrow('interestAmount')}</th>
                         <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('open', 'daysHeld')">Days${getSortArrow('daysHeld')}</th>
                         <th class="num" style="color: var(--warning)">Breakeven</th>
@@ -49,6 +50,9 @@ class Components {
             // Check if we have legs (should always have at least 1)
             const hasLegs = pos.legs && pos.legs.length > 0;
             const drillId = `drill-${idx}`;
+
+                const lastPrice = pos.currentPrice ? pos.currentPrice.toFixed(2) : '-';
+                const lastSource = pos.priceSource ? ` (${pos.priceSource})` : '';
 
             // Toggle Button - Always show if we have leg data
             const toggleBtn = hasLegs
@@ -74,6 +78,7 @@ class Components {
                     <td style="font-weight: 600;">${symbolContent}</td>
                     <td class="num">${pos.qty}</td>
                     <td class="num">${pos.avgPrice.toFixed(2)}</td>
+                    <td class="num" title="${lastSource}">${lastPrice}</td>
                     <td class="num" style="color: var(--warning)">${this.formatCurrency(pos.interestAmount)}</td>
                     <td class="num" title="Buy Date: ${pos.buyDate.toLocaleDateString()}">${pos.daysHeld}</td>
                     <td class="num" style="color: var(--warning); font-weight: bold;">${pos.breakevenPrice.toFixed(2)}</td>
@@ -93,7 +98,7 @@ class Components {
             if (hasLegs) {
                 let legsHtml = `
                     <tr id="${drillId}" class="hidden" style="background-color: rgba(255, 255, 255, 0.03);">
-                        <td colspan="10" style="padding: 0;">
+                        <td colspan="12" style="padding: 0;">
                             <div style="padding: 0.5rem 0.5rem 0.5rem 3.5rem; border-left: 2px solid var(--accent-primary);">
                                 <table style="width: 100%; font-size: 0.8rem; opacity: 0.9;">
                                     <thead>

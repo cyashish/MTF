@@ -12,6 +12,17 @@ const CONFIG = {
     // Profit targets to calculate
     profitTargets: [1, 2, 3, 5, 10], // Percentages
 
+    // Market timing and polling
+    marketHours: {
+        timezone: 'Asia/Kolkata', // IST
+        openHour: 9,
+        openMinute: 15,
+        closeHour: 15,
+        closeMinute: 30,
+        workingDays: [1, 2, 3, 4, 5] // Mon-Fri
+    },
+    pricePollIntervalMs: 3600000, // 1 hour
+
     // Mapping for user data (can be heuristic based)
     columnMapping: {
         date: ['date', 'trade_date', 'order_date', 'time'],

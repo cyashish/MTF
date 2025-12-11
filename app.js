@@ -53,6 +53,40 @@ const APP = {
         });
     },
 
+    isMarketOpen(now = new Date()) {
+        const { marketHours } = CONFIG;
+        const istNow = new Date(now.toLocaleString('en-US', { timeZone: marketHours.timezone || 'Asia/Kolkata' }));
+        const day = istNow.getDay(); // 0 = Sun
+
+        if (!marketHours.workingDays.includes(day)) {
+            return { isOpen: false, reason: 'Market closed (weekend/holiday)' };
+        }
+
+        const minutes = istNow.getHours() * 60 + istNow.getMinutes();
+        const openMinutes = (marketHours.openHour * 60) + marketHours.openMinute;
+        const closeMinutes = (marketHours.closeHour * 60) + marketHours.closeMinute;
+
+        const isOpen = minutes >= openMinutes && minutes <= closeMinutes;
+        return { isOpen, reason: isOpen ? 'Market open' : 'Market closed (outside hours)' };
+    },
+
+    startPolling() {
+        // Clear previous interval
+        if (this.pollingInterval) clearInterval(this.pollingInterval);
+
+        const poll = async () => {
+            if (!window.APP_STATE.positions || window.APP_STATE.positions.length === 0) return;
+            const market = this.isMarketOpen();
+            await this.fetchAllPrices(market);
+        };
+
+        // Initial fetch
+        poll();
+
+        // Schedule
+        this.pollingInterval = setInterval(poll, CONFIG.pricePollIntervalMs || 3600000);
+    },
+
     async handleProcess() {
         const input = document.getElementById('pasteInput').value;
         const btn = document.getElementById('btnProcess');
@@ -98,7 +132,7 @@ const APP = {
             status.innerHTML = `<span class="positive">Processed ${rawTrades.length} trades. Open: ${totalPos}, Closed: ${closedCount}.</span>`;
 
             // Start Live Price Polling
-            // this.startPolling();
+            this.startPolling();
 
         } catch (e) {
             console.error(e);
@@ -110,27 +144,16 @@ const APP = {
     },
 
     // Live Price Polling
-    startPolling() {
-        if (this.pollingInterval) clearInterval(this.pollingInterval);
-
-        // Initial Fetch
-        this.fetchAllPrices();
-
-        // Poll every hour (3600000 ms)
-        this.pollingInterval = setInterval(() => {
-            this.fetchAllPrices();
-        }, 3600000);
-    },
-
-    async fetchAllPrices() {
+    async fetchAllPrices(marketStatus = { isOpen: false, reason: '' }) {
         if (!window.APP_STATE.positions) return;
 
         console.log("Fetching live prices...");
         const status = document.getElementById('statusMsg');
         const originalText = status.textContent;
-        status.textContent = "Fetching live prices...";
+        status.textContent = marketStatus.isOpen ? "Fetching live prices..." : "Fetching last close prices...";
 
         let updatedCount = 0;
+        let lastSource = '';
 
         // Use a map to store prices to avoid refetching same symbol multiple times
         const priceMap = new Map();
@@ -139,9 +162,10 @@ const APP = {
         const symbols = [...new Set(window.APP_STATE.positions.map(p => p.symbol))];
 
         for (const sym of symbols) {
-            const price = await DataHandler.fetchPrice(sym);
-            if (price !== null && price > 0) {
-                priceMap.set(sym, price);
+            const res = await DataHandler.fetchPrice(sym, { marketOpen: marketStatus.isOpen });
+            if (res && res.price !== null && res.price > 0) {
+                priceMap.set(sym, res.price);
+                lastSource = res.source || lastSource;
                 updatedCount++;
             }
         }
@@ -154,12 +178,26 @@ const APP = {
                 // Best approach: Add 'currentPrice' to position object and re-render OR update DOM.
                 // Updating DOM is smoother if user is typing, but re-render is safer for consistency.
                 pos.currentPrice = priceMap.get(pos.symbol);
+                pos.priceSource = lastSource || 'unknown';
             }
         });
 
         if (updatedCount > 0) {
             console.log(`Updated prices for ${updatedCount} symbols.`);
-            status.textContent = `Updated prices for ${updatedCount} symbols.`;
+            const ts = new Date();
+            window.APP_STATE.priceMeta = {
+                updatedAt: ts,
+                marketOpen: marketStatus.isOpen,
+                source: lastSource || (marketStatus.isOpen ? 'regularMarketPrice' : 'previousClose')
+            };
+            const tsStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            status.textContent = `Updated prices (${lastSource || 'auto'}).`;
+
+            // Update price meta banner
+            const metaEl = document.getElementById('priceMeta');
+            if (metaEl) {
+                metaEl.textContent = `Prices updated at ${tsStr} (IST) using ${window.APP_STATE.priceMeta.source} — ${marketStatus.isOpen ? 'Market open' : 'Market closed'}`;
+            }
 
             // Re-render (preserving sort)
             this.renderDashboard(window.APP_STATE.positions, window.APP_STATE.closedPositions, document.getElementById('customTarget')?.value || 10);
@@ -216,6 +254,18 @@ const APP = {
 
     renderDashboard(openPositions, closedPositions, customTarget = 10) {
         document.getElementById('dashboard').classList.remove('hidden');
+
+        // Price meta banner
+        const priceMetaEl = document.getElementById('priceMeta');
+        if (priceMetaEl) {
+            const meta = window.APP_STATE.priceMeta;
+            if (meta && meta.updatedAt) {
+                const tsStr = meta.updatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                priceMetaEl.textContent = `Prices updated at ${tsStr} (IST) using ${meta.source || 'auto'} — ${meta.marketOpen ? 'Market open' : 'Market closed'}`;
+            } else {
+                priceMetaEl.textContent = '';
+            }
+        }
 
         // Apply Sorting
         const sortedOpen = this.sortList(openPositions, 'open');

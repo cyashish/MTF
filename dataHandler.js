@@ -208,7 +208,7 @@ class DataHandler {
     }
 
     // Live Price Integration
-    static async fetchPrice(symbol) {
+    static async fetchPrice(symbol, { marketOpen = false } = {}) {
         try {
             // Yahoo Finance API via AllOrigins Proxy (to bypass CORS on file://)
             const ySymbol = `${symbol}.NS`;
@@ -233,25 +233,15 @@ class DataHandler {
 
             const meta = data.chart.result[0].meta;
 
-            // Logic:
-            // If > 3:30 PM (15:30) -> Close Price
-            // If < 3:30 PM -> Prioritize Prev Close (as requested: "before that give previous day close or day's open")
-
-            const now = new Date();
-            const currentHour = now.getHours();
-            const currentMin = now.getMinutes();
-
-            const isAfterMarket = (currentHour > 15) || (currentHour === 15 && currentMin >= 30);
-
             // Yahoo Meta Fields: regularMarketPrice, previousClose, regularMarketOpen
             const currentPrice = meta.regularMarketPrice;
             const prevClose = meta.previousClose;
 
-            if (isAfterMarket) {
-                return currentPrice || 0;
-            } else {
-                return prevClose || currentPrice || 0;
+            // Decide source based on market status
+            if (marketOpen) {
+                return { price: currentPrice || prevClose || 0, source: 'regularMarketPrice' };
             }
+            return { price: prevClose || currentPrice || 0, source: 'previousClose' };
 
         } catch (e) {
             console.error(`Failed to fetch price for ${symbol}`, e);
