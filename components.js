@@ -51,8 +51,8 @@ class Components {
             const hasLegs = pos.legs && pos.legs.length > 0;
             const drillId = `drill-${idx}`;
 
-                const lastPrice = pos.currentPrice ? pos.currentPrice.toFixed(2) : '-';
-                const lastSource = pos.priceSource ? ` (${pos.priceSource})` : '';
+            const lastPrice = pos.currentPrice ? pos.currentPrice.toFixed(2) : '-';
+            const lastSource = pos.priceSource ? ` (${pos.priceSource})` : '';
 
             // Toggle Button - Always show if we have leg data
             const toggleBtn = hasLegs
@@ -178,32 +178,38 @@ class Components {
             return sortConfig.dir === 'asc' ? ' ▲' : ' ▼';
         };
 
-        // Calculate Total P&L
-        // Calculate Total P&L and Interest
+        // Calculate Totals
         const totalGrossPnL = positions.reduce((sum, p) => sum + (p.grossPnL || 0), 0);
         const totalPnL = positions.reduce((sum, p) => sum + p.realizedPnL, 0);
         const totalInterest = positions.reduce((sum, p) => sum + (p.totalInterest || 0), 0);
 
+        // Calculate Split Totals
+        const totalIntradayPnL = positions.reduce((sum, p) => sum + (p.intradayPnL || 0), 0);
+        const totalDeliveryPnL = totalPnL - totalIntradayPnL;
+
         const totalPnLColor = totalPnL >= 0 ? 'var(--success)' : 'var(--warning)';
-        const totalGrossColor = totalGrossPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+        const deliveryColor = totalDeliveryPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+        const intradayColor = totalIntradayPnL >= 0 ? 'var(--success)' : 'var(--warning)';
 
         let html = `
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 250px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'symbol')">Symbol${getSortArrow('symbol')}</th>
+                        <th style="width: 200px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Closed Qty</th>
-                        <th class="num">Gross P&L</th>
-                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'totalInterest')">Total Interest${getSortArrow('totalInterest')}</th>
+                        <th class="num">Delivery P&L</th>
+                        <th class="num">Intraday P&L</th>
+                        <th class="num">Total Interest</th>
                         <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'realizedPnL')">Net P&L${getSortArrow('realizedPnL')}</th>
                     </tr>
                 </thead>
                 <tbody>
                     <!-- Total Row -->
                     <tr style="background-color: rgba(255,255,255,0.05); font-weight: bold; border-bottom: 2px solid var(--border-color);">
-                        <td style="padding: 1rem 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Total Realized P&L</td>
+                        <td style="padding: 1rem 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Total Realized</td>
                         <td></td>
-                        <td class="num" style="color: ${totalGrossColor};">${this.formatCurrency(totalGrossPnL)}</td>
+                        <td class="num" style="color: ${deliveryColor};">${this.formatCurrency(totalDeliveryPnL)}</td>
+                        <td class="num" style="color: ${intradayColor};">${this.formatCurrency(totalIntradayPnL)}</td>
                         <td class="num" style="color: var(--warning);">${this.formatCurrency(totalInterest)}</td>
                         <td class="num" style="color: ${totalPnLColor}; font-size: 1.1em;">${this.formatCurrency(totalPnL)}</td>
                     </tr>
@@ -217,7 +223,17 @@ class Components {
                          onclick="document.getElementById('${drillId}').classList.toggle('hidden'); this.textContent = this.textContent === '+' ? '-' : '+'">+</span>`;
 
             const pnlColor = pos.realizedPnL >= 0 ? 'var(--success)' : 'var(--warning)';
-            const grossColor = (pos.grossPnL || 0) >= 0 ? 'var(--success)' : 'var(--warning)';
+
+            // Split PnL for Row
+            const iPnL = pos.intradayPnL || 0;
+            const dPnL = pos.realizedPnL - iPnL;
+
+            const iColor = iPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+            const dColor = dPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+
+            // Hide 0s if irrelevant to reduce clutter? Or show for completeness. Showing is better for alignment.
+            const iText = iPnL !== 0 ? this.formatCurrency(iPnL) : '-';
+            const dText = dPnL !== 0 ? this.formatCurrency(dPnL) : '-';
 
             html += `
                 <tr>
@@ -225,11 +241,12 @@ class Components {
                         <div style="display:flex; align-items:center;">
                             ${toggleBtn}
                             <span>${pos.symbol}</span>
-                            <span style="font-size:0.7em; opacity:0.6; margin-left:8px; align-self:center;">(${pos.legs.length} trades)</span>
+                            <span style="font-size:0.7em; opacity:0.6; margin-left:8px; align-self:center;">(${pos.legs.length})</span>
                         </div>
                     </td>
                     <td class="num">${pos.qty}</td>
-                    <td class="num" style="color: ${grossColor};">${this.formatCurrency(pos.grossPnL || 0)}</td>
+                    <td class="num" style="color: ${dColor}; opacity: ${dPnL !== 0 ? 1 : 0.5}">${dText}</td>
+                    <td class="num" style="color: ${iColor}; opacity: ${iPnL !== 0 ? 1 : 0.5}">${iText}</td>
                     <td class="num" style="color: var(--warning);">${this.formatCurrency(pos.totalInterest || 0)}</td>
                     <td class="num" style="color: ${pnlColor}; font-weight:bold;">${this.formatCurrency(pos.realizedPnL)}</td>
                 </tr>
@@ -238,17 +255,17 @@ class Components {
             // Drill Down row
             let legsHtml = `
                 <tr id="${drillId}" class="hidden" style="background-color: rgba(255, 255, 255, 0.03);">
-                    <td colspan="5" style="padding: 0;">
+                    <td colspan="6" style="padding: 0;">
                         <div style="padding: 0.5rem 0.5rem 0.5rem 3.5rem; border-left: 2px solid var(--accent-primary);">
                             <table style="width: 100%; font-size: 0.8rem; opacity: 0.9;">
                                 <thead>
                                     <tr style="border-bottom: 1px solid var(--border-color);">
+                                        <th style="background:transparent; padding:0.4rem; text-align:left; color:var(--text-secondary);">Type</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:left; color:var(--text-secondary);">Buy Date</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:left; color:var(--text-secondary);">Sell Date</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Qty</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Buy Price</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Sell Price</th>
-                                        <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Gross P&L</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Interest</th>
                                         <th style="background:transparent; padding:0.4rem; text-align:right; color:var(--text-secondary);">Net P&L</th>
                                     </tr>
@@ -258,16 +275,18 @@ class Components {
 
             pos.legs.forEach(leg => {
                 const legPnlColor = leg.pnl >= 0 ? 'var(--success)' : 'var(--warning)';
-                const legGrossColor = (leg.grossPnl || 0) >= 0 ? 'var(--success)' : 'var(--warning)';
+                const typeBadge = leg.type === 'MIS'
+                    ? '<span style="color:var(--accent-secondary); font-weight:bold;">T</span>'
+                    : '<span style="color:var(--text-muted);">D</span>';
 
                 legsHtml += `
                     <tr style="border:none;">
+                        <td style="padding:0.3rem 0.4rem; border:none;">${typeBadge}</td>
                         <td style="padding:0.3rem 0.4rem; border:none;">${this.formatDate(leg.buyDate)}</td>
                         <td style="padding:0.3rem 0.4rem; border:none;">${this.formatDate(leg.sellDate)}</td>
                         <td style="padding:0.3rem 0.4rem; text-align:right; border:none;">${leg.qty}</td>
                         <td style="padding:0.3rem 0.4rem; text-align:right; border:none;">${leg.buyPrice.toFixed(2)}</td>
                         <td style="padding:0.3rem 0.4rem; text-align:right; border:none;">${leg.sellPrice.toFixed(2)}</td>
-                        <td style="padding:0.3rem 0.4rem; text-align:right; color: ${legGrossColor}; border:none;">${this.formatCurrency(leg.grossPnl || 0)}</td>
                         <td style="padding:0.3rem 0.4rem; text-align:right; color: var(--warning); border:none;">${this.formatCurrency(leg.interest || 0)}</td>
                         <td style="padding:0.3rem 0.4rem; text-align:right; color: ${legPnlColor}; border:none;">${this.formatCurrency(leg.pnl)}</td>
                     </tr>

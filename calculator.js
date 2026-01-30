@@ -390,6 +390,7 @@ class Calculator {
                 qty: cp.totalClosedQty,
                 grossPnL: cp.grossPnL || 0,
                 realizedPnL: cp.realizedPnL,
+                intradayPnL: cp.intradayPnL || 0, // Exposed for UI
                 totalInterest: cp.totalInterest || 0,
                 legs: cp.legs
             }));
