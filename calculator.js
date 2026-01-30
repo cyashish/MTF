@@ -48,11 +48,15 @@ class Calculator {
         // 2. Sort by Date
         trades.sort((a, b) => a.date - b.date);
 
-        // 3. FIFO Engine
-        const positions = {};
-        const closedPositions = {}; // New storage for closed trades
+        // 3. Separate Logic for Delivery (FIFO) vs Intraday (Day-wise)
+        const deliveryTrades = trades.filter(t => t.orderType === 'MTF');
+        const intradayTrades = trades.filter(t => t.orderType === 'MIS');
 
-        trades.forEach(trade => {
+        const positions = {};
+        const closedPositions = {}; // Storage for closed trades
+
+        // --- PART A: DELIVERY (FIFO) ---
+        deliveryTrades.forEach(trade => {
             // Ensure Position Object Exists
             if (!positions[trade.symbol]) {
                 positions[trade.symbol] = {
@@ -68,7 +72,10 @@ class Calculator {
                     symbol: trade.symbol,
                     totalClosedQty: 0,
                     realizedPnL: 0,
-                    legs: []
+                    legs: [],
+                    // Intraday stats specific
+                    intradayPnL: 0,
+                    intradayQty: 0
                 };
             }
 
@@ -76,25 +83,27 @@ class Calculator {
             const closedPos = closedPositions[trade.symbol];
 
             if (trade.side === 'BUY') {
-                // If expenses are provided (from file), use them. Else estimate.
-                // Calculate Charges
+                // Calculation matches previous logic
                 let brokerageAmount = 0;
-
                 if (trade.expenses || trade.expenses === 0) {
-                    // File provided explicit brokerage
                     brokerageAmount = trade.expenses * trade.qty;
                 } else {
-                    // Estimate Brokerage
                     brokerageAmount = (trade.qty * trade.price) * CONFIG.brokerage;
-                    // Apply min/max logic if needed? For now straightforward pct
-                    // However user mentioned min 3rs or 5rs. 
-                    // Let's stick to percentage as it matches the file samples best (0.4%)
                 }
 
-                // Always add Taxes/STT on top for Accurate Breakeven
-                // (File usually contains only Base Brokerage based on analysis)
-                const taxes = this.calculateTaxesOnly(trade.qty, trade.price, brokerageAmount);
-                const charges = brokerageAmount + taxes;
+                // Calculate Delivery Charges (Buy)
+                // STT on Delivery Buy = 0.1%
+                const stt = (trade.qty * trade.price) * 0.001;
+
+                // We restart standard calculation excluding STT to avoid double calc if we used helper
+                // Actually, let's just use a clean calculation block here
+                const turnover = trade.qty * trade.price;
+                const txn = turnover * CONFIG.txnCharge;
+                const sebi = turnover * CONFIG.sebiCharge;
+                const stamp = turnover * CONFIG.stampDuty; // Buy side stamp
+                const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
+
+                const charges = brokerageAmount + stt + txn + sebi + stamp + gst;
 
                 pos.buyQueue.push({
                     qty: trade.qty,
@@ -110,18 +119,17 @@ class Calculator {
                 // SELL
                 let qtyToSell = trade.qty;
 
-                // Calculate sell-side expenses per unit for this specific sell order
-                let totalSellCharges = trade.expenses * trade.qty;
-                if (!trade.expenses && trade.expenses !== 0) {
-                    // Estimate if not provided using detailed CONFIG
-                    // Sell side: Brokerage + STT + Txn + Sebi + GST
+                // Validate Expenses
+                let totalSellCharges = 0;
+                if (trade.expenses || trade.expenses === 0) {
+                    totalSellCharges = trade.expenses * trade.qty;
+                } else {
                     const turnover = trade.qty * trade.price;
                     const brokerage = turnover * CONFIG.brokerage;
                     const stt = turnover * CONFIG.sttSell;
                     const txn = turnover * CONFIG.txnCharge;
                     const sebi = turnover * CONFIG.sebiCharge;
-                    const gst = (brokerage + txn + sebi) * CONFIG.gst; // GST is on Brkg + Txn + Sebi (usually)
-
+                    const gst = (brokerage + txn + sebi) * CONFIG.gst;
                     totalSellCharges = brokerage + stt + txn + sebi + gst;
                 }
                 let sellExpensesPerUnit = totalSellCharges / trade.qty;
@@ -131,16 +139,13 @@ class Calculator {
                     let matchedQty = 0;
 
                     if (matchLeg.qty <= qtyToSell) {
-                        // Full match of this buy leg
                         matchedQty = matchLeg.qty;
                         qtyToSell -= matchLeg.qty;
                         pos.totalOpenQty -= matchLeg.qty;
                         pos.buyQueue.shift();
                     } else {
-                        // Partial match
                         matchedQty = qtyToSell;
                         matchLeg.qty -= matchedQty;
-                        // Pro-rate remaining charges on the buy leg
                         matchLeg.charges -= (matchLeg.expensesPerUnit * matchedQty);
                         pos.totalOpenQty -= matchedQty;
                         qtyToSell = 0;
@@ -154,20 +159,18 @@ class Calculator {
 
                     // --- INTEREST CALCULATION (Realized) ---
                     let daysHeld = Math.round((trade.date - matchLeg.date) / (24 * 60 * 60 * 1000));
-                    if (isNaN(daysHeld)) daysHeld = 0; // Guard against invalid dates
+                    if (isNaN(daysHeld)) daysHeld = 0;
                     daysHeld = Math.max(0, daysHeld);
 
                     const annualRate = CONFIG.mtfInterestRate;
                     const fundedRatio = configOverrides.fundedRatio || 1.0;
 
-                    const legDebit = buyCost + buyExp; // Total cost to be funded
+                    const legDebit = buyCost + buyExp;
                     const legLoan = legDebit * fundedRatio;
 
                     let interest = legLoan * (annualRate / 365) * daysHeld;
                     if (isNaN(interest)) interest = 0;
 
-                    // --- NET P&L ---
-                    // Gross P&L = Sold Value - Buy Cost - Buy Expenses - Sell Expenses
                     const grossPnl = sellVal - buyCost - buyExp - sellExp;
                     let netPnl = grossPnl - interest;
                     if (isNaN(netPnl)) netPnl = 0;
@@ -187,7 +190,7 @@ class Calculator {
                         sellDate: trade.date,
                         sellPrice: trade.price,
                         grossPnl: grossPnl,
-                        pnl: netPnl, // Renamed from netPnl to matches Components.js expectation
+                        pnl: netPnl,
                         daysHeld: daysHeld,
                         interest: interest,
                         type: 'MTF'
@@ -195,6 +198,105 @@ class Calculator {
                 }
             }
         });
+
+        // --- PART B: INTRADAY (Day-wise) ---
+        // Group by Symbol + Date
+        const intradayGroups = {};
+        intradayTrades.forEach(t => {
+            const dateKey = t.date.toISOString().split('T')[0]; // YYYY-MM-DD
+            const key = `${t.symbol}|${dateKey}`;
+            if (!intradayGroups[key]) {
+                intradayGroups[key] = {
+                    symbol: t.symbol,
+                    date: t.date,
+                    buys: [],
+                    sells: []
+                };
+            }
+            if (t.side === 'BUY') intradayGroups[key].buys.push(t);
+            else intradayGroups[key].sells.push(t);
+        });
+
+        Object.values(intradayGroups).forEach(group => {
+            // Aggregate Day Stats
+            const totalBuyQty = group.buys.reduce((sum, t) => sum + t.qty, 0);
+            const totalSellQty = group.sells.reduce((sum, t) => sum + t.qty, 0);
+
+            // We match only the MIN(buy, sell) as completed intraday volume
+            const matchedQty = Math.min(totalBuyQty, totalSellQty);
+
+            if (matchedQty > 0) {
+                // Weighted Average Buy Price
+                let totalBuyVal = 0;
+                let totalBuyExp = 0;
+                group.buys.forEach(t => {
+                    totalBuyVal += t.qty * t.price;
+                    // Calculate expenses if missing
+                    if (t.expenses === null || t.expenses === undefined) {
+                        t.expenses = this.estimateIntradayCharges(t.qty, t.price, 'BUY') / t.qty;
+                    }
+                    totalBuyExp += t.qty * t.expenses;
+                });
+                const avgBuyPrice = totalBuyVal / totalBuyQty;
+                const avgBuyExp = totalBuyExp / totalBuyQty;
+
+                // Weighted Average Sell Price
+                let totalSellVal = 0;
+                let totalSellExp = 0;
+                group.sells.forEach(t => {
+                    totalSellVal += t.qty * t.price;
+                    if (t.expenses === null || t.expenses === undefined) {
+                        t.expenses = this.estimateIntradayCharges(t.qty, t.price, 'SELL') / t.qty;
+                    }
+                    totalSellExp += t.qty * t.expenses;
+                });
+                const avgSellPrice = totalSellVal / totalSellQty;
+                const avgSellExp = totalSellExp / totalSellQty;
+
+                // Calculate PnL on Matched Qty
+                const buyCost = matchedQty * avgBuyPrice;
+                const buyCharges = matchedQty * avgBuyExp;
+                const sellVal = matchedQty * avgSellPrice;
+                const sellCharges = matchedQty * avgSellExp;
+
+                const grossPnl = sellVal - buyCost - buyCharges - sellCharges;
+
+                // Update Closed Position Stats
+                if (!closedPositions[group.symbol]) {
+                    closedPositions[group.symbol] = {
+                        symbol: group.symbol,
+                        totalClosedQty: 0,
+                        realizedPnL: 0,
+                        legs: [],
+                        intradayPnL: 0,
+                        intradayQty: 0
+                    };
+                }
+                const cp = closedPositions[group.symbol];
+
+                // Add to totals
+                cp.realizedPnL += grossPnl;
+                cp.totalClosedQty += matchedQty; // Technically it's volume, but for PnL summary effectively closed
+                cp.intradayPnL = (cp.intradayPnL || 0) + grossPnl;
+                cp.intradayQty = (cp.intradayQty || 0) + matchedQty;
+
+                // Add a summary leg
+                cp.legs.push({
+                    symbol: group.symbol,
+                    qty: matchedQty,
+                    buyDate: group.date,
+                    buyPrice: avgBuyPrice,
+                    sellDate: group.date,
+                    sellPrice: avgSellPrice,
+                    grossPnl: grossPnl,
+                    pnl: grossPnl, // No interest on intraday
+                    daysHeld: 0,
+                    interest: 0,
+                    type: 'MIS' // Marker
+                });
+            }
+        });
+
 
         // 4. Update Open Positions Results
         const openResults = [];
@@ -295,13 +397,29 @@ class Calculator {
         return { openPositions: openResults, closedPositions: closedResults };
     }
 
-    static calculateTaxesOnly(qty, price, brokerageAmount) {
+    static calculateTaxesOnly(qty, price, brokerageAmount, isDelivery = true) {
         // Calculates non-brokerage costs: STT, Txn, Sebi, Stamp, GST
         const turnover = qty * price;
-        const stt = turnover * 0.001; // STT on Delivery Buy is 0.1%
+
+        let stt = 0;
+        if (isDelivery) {
+            stt = turnover * 0.001; // STT on Delivery Buy is 0.1% (Standard)
+        } else {
+            // Intraday: STT is on Sell only (usually). 0.025%
+            // But this method doesn't know side. We'll assume this is called wisely.
+            // If it's a Buy, Intraday STT is 0. If Sell, 0.025%
+            // However, this helper is generic. 
+            // IMPROVEMENT: Pass side or split logic.
+            // For now, if isDelivery=false, we'll assume caller handles STT separately or we use a blended approach?
+            // Actually, best to pass STT rate or handle it in specific estimate methods.
+            // Let's assume standard behavior:
+            // If calling for general taxes, we might just apply the sell-side STT rate?
+            stt = turnover * (CONFIG.sttIntraday || 0.00025);
+        }
+
         const txn = turnover * CONFIG.txnCharge;
         const sebi = turnover * CONFIG.sebiCharge;
-        const stamp = turnover * CONFIG.stampDuty; // Stamp duty only on buy
+        const stamp = turnover * CONFIG.stampDuty; // Stamp duty only on buy typically, but here we lump it
 
         // GST is on Brokerage + Txn + Sebi
         const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
@@ -313,9 +431,32 @@ class Calculator {
         // Detailed estimation for Buy Side (Delivery)
         const turnover = qty * price;
         const brokerage = turnover * CONFIG.brokerage;
-        const taxes = this.calculateTaxesOnly(qty, price, brokerage);
+        // Delivery Buy STT = 0.1%
+        const stt = turnover * 0.001;
 
-        return brokerage + taxes;
+        const txn = turnover * CONFIG.txnCharge;
+        const sebi = turnover * CONFIG.sebiCharge;
+        const stamp = turnover * CONFIG.stampDuty;
+        const gst = (brokerage + txn + sebi) * CONFIG.gst;
+
+        return brokerage + stt + txn + sebi + stamp + gst;
+    }
+
+    static estimateIntradayCharges(qty, price, side) {
+        const turnover = qty * price;
+        const brokerage = turnover * CONFIG.brokerageIntraday;
+
+        // STT Intraday: 0 on Buy, 0.025% on Sell
+        const stt = side === 'SELL' ? (turnover * CONFIG.sttIntraday) : 0;
+
+        const txn = turnover * CONFIG.txnCharge;
+        const sebi = turnover * CONFIG.sebiCharge;
+        // Stamp Duty: 0.003% on Buy (usually), 0 on Sell
+        const stamp = side === 'BUY' ? (turnover * 0.00003) : 0;
+
+        const gst = (brokerage + txn + sebi) * CONFIG.gst;
+
+        return brokerage + stt + txn + sebi + stamp + gst;
     }
 
     static calculateBreakeven(buyValueRaw, buyCharges, totalInterest, qty, customTargetPct) {
