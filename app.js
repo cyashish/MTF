@@ -6,6 +6,13 @@ const APP = {
 
         // Event Listeners
         document.getElementById('btnProcess').addEventListener('click', this.handleProcess.bind(this));
+        document.getElementById('btnStoreOld')?.addEventListener('click', this.handleStoreOld.bind(this));
+        document.getElementById('btnClearOld')?.addEventListener('click', this.handleClearOld.bind(this));
+        
+        document.getElementById('btnUploadOld')?.addEventListener('click', () => document.getElementById('oldDataFile')?.click());
+        document.getElementById('oldDataFile')?.addEventListener('change', this.handleUploadOld.bind(this));
+
+        this.updateOldDataStatus();
 
         // Create global access for inline onclicks
         window.APP = this;
@@ -127,13 +134,148 @@ const APP = {
         this.pollingInterval = setInterval(poll, CONFIG.pricePollIntervalMs || 3600000);
     },
 
+    async handleStoreOld() {
+        const input = document.getElementById('pasteInput').value;
+        const status = document.getElementById('statusMsg');
+        
+        if (!input.trim()) {
+            status.innerHTML = '<span class="negative">Please paste old data first.</span>';
+            return;
+        }
+
+        try {
+            const rawTrades = await DataHandler.parseInput(input);
+            if (rawTrades.length === 0) {
+                throw new Error("No valid trades found to store.");
+            }
+            
+            let storedTrades = rawTrades;
+            const existingStr = localStorage.getItem('mtf_old_trades');
+            if (existingStr) {
+                try {
+                    const existing = JSON.parse(existingStr);
+                    storedTrades = existing.concat(rawTrades);
+                } catch(e) {}
+            }
+            
+            localStorage.setItem('mtf_old_trades', JSON.stringify(storedTrades));
+            this.updateOldDataStatus();
+            status.innerHTML = `<span class="positive">Successfully stored ${rawTrades.length} trades as old data (Total: ${storedTrades.length}).</span>`;
+            document.getElementById('pasteInput').value = ''; // clear for next input
+        } catch (e) {
+            console.error(e);
+            status.innerHTML = `<span class="negative">Error storing: ${e.message}</span>`;
+        }
+    },
+
+    async handleUploadOld(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const status = document.getElementById('statusMsg');
+        status.innerHTML = 'Reading file...';
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const content = e.target.result;
+            try {
+                const rawTrades = await DataHandler.parseInput(content);
+                if (rawTrades.length === 0) {
+                    throw new Error("No valid trades found in file.");
+                }
+                
+                let storedTrades = rawTrades;
+                const existingStr = localStorage.getItem('mtf_old_trades');
+                if (existingStr) {
+                    try {
+                        const existing = JSON.parse(existingStr);
+                        storedTrades = existing.concat(rawTrades);
+                    } catch(err) {}
+                }
+                
+                localStorage.setItem('mtf_old_trades', JSON.stringify(storedTrades));
+                this.updateOldDataStatus();
+                status.innerHTML = `<span class="positive">Successfully uploaded and stored ${rawTrades.length} trades as old data (Total: ${storedTrades.length}).</span>`;
+            } catch (err) {
+                console.error(err);
+                status.innerHTML = `<span class="negative">Error parsing file: ${err.message}</span>`;
+            } finally {
+                event.target.value = ''; // Reset to allow re-upload
+            }
+        };
+        reader.onerror = () => {
+            status.innerHTML = `<span class="negative">Error reading file.</span>`;
+            event.target.value = '';
+        };
+        reader.readAsText(file);
+    },
+
+    handleClearOld() {
+        if (!confirm('Are you sure you want to clear stored old data?')) return;
+        localStorage.removeItem('mtf_old_trades');
+        this.updateOldDataStatus();
+        document.getElementById('statusMsg').innerHTML = `<span class="positive">Old data cleared.</span>`;
+    },
+
+    updateOldDataStatus() {
+        const span = document.getElementById('oldDataStatus');
+        if (!span) return;
+        const oldDataStr = localStorage.getItem('mtf_old_trades');
+        if (oldDataStr) {
+            try {
+                const parsed = JSON.parse(oldDataStr);
+                
+                // Group by Financial Year
+                const fyCounts = {};
+                parsed.forEach(rawTrade => {
+                    const dt = Calculator.normalizeTrade(rawTrade).date;
+                    if (dt && !isNaN(dt.getTime())) {
+                        const m = dt.getMonth() + 1; // 1 to 12
+                        const y = dt.getFullYear();
+                        
+                        let fyStart, fyEnd;
+                        if (m >= 4) {
+                            fyStart = y;
+                            fyEnd = y + 1;
+                        } else {
+                            fyStart = y - 1;
+                            fyEnd = y;
+                        }
+                        
+                        const fyLabel = `Apr${String(fyStart).slice(-2)}-Mar${String(fyEnd).slice(-2)}`;
+                        fyCounts[fyLabel] = (fyCounts[fyLabel] || 0) + 1;
+                    }
+                });
+
+                const summaryParts = Object.entries(fyCounts).sort((a,b) => a[0].localeCompare(b[0])).map(([fy, count]) => `${fy}: ${count}`);
+                
+                if (summaryParts.length > 0) {
+                    span.innerHTML = `<div style="display:flex; flex-direction:column; align-items:flex-end;">
+                        <span style="font-weight:600; color:#10b981;">${parsed.length} old trades</span>
+                        <span style="font-size:0.75rem; color: var(--text-muted);">${summaryParts.join(' | ')}</span>
+                    </div>`;
+                } else {
+                    span.innerHTML = `<span style="color:#10b981;">${parsed.length} old trades stored</span>`;
+                }
+            } catch (e) {
+                span.textContent = '0 old trades stored';
+                span.style.color = '';
+            }
+        } else {
+            span.textContent = '0 old trades stored';
+            span.style.color = '';
+        }
+    },
+
     async handleProcess() {
         const input = document.getElementById('pasteInput').value;
         const btn = document.getElementById('btnProcess');
         const spinner = document.getElementById('loadingSpinner');
         const status = document.getElementById('statusMsg');
 
-        if (!input.trim()) {
+        const oldDataStr = localStorage.getItem('mtf_old_trades');
+
+        if (!input.trim() && !oldDataStr) {
             status.innerHTML = '<span class="negative">Please paste some data first.</span>';
             return;
         }
@@ -144,8 +286,24 @@ const APP = {
         status.textContent = 'Parsing...';
 
         try {
-            // 1. Parse
-            const rawTrades = await DataHandler.parseInput(input);
+            // 1. Parse current data
+            let currentTrades = [];
+            if (input.trim()) {
+                currentTrades = await DataHandler.parseInput(input);
+            }
+            
+            let rawTrades = [...currentTrades];
+            
+            // Add old data if available
+            if (oldDataStr) {
+                try {
+                    const oldTrades = JSON.parse(oldDataStr);
+                    rawTrades = oldTrades.concat(rawTrades);
+                } catch(e) {
+                    console.error("Error parsing old trades", e);
+                }
+            }
+
             console.log('Parsed trades:', rawTrades.length);
 
             if (rawTrades.length === 0) {

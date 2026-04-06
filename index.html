@@ -50,8 +50,21 @@ B
                         <span id="loadingSpinner" class="loading hidden"></span>
                         Process Trades
                     </button>
-                    <!-- <button class="secondary">Load Example Data</button> -->
                     <span id="statusMsg" class="text-sm text-muted" style="margin-left: auto;"></span>
+                </div>
+
+                <div class="flex" style="align-items: center; justify-content: space-between; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <button id="btnStoreOld" class="secondary" style="font-size: 0.85rem;">Store Input as Old</button>
+                        <span class="text-sm text-muted" style="font-size: 0.75rem;">OR</span>
+                        <input type="file" id="oldDataFile" accept=".csv, .txt" style="display: none;">
+                        <button id="btnUploadOld" class="secondary" style="font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+                            Upload CSV
+                        </button>
+                        <button id="btnClearOld" class="secondary" style="font-size: 0.85rem; margin-left: 0.5rem; color: #ef4444; border-color: #fca5a5;">Clear Old</button>
+                    </div>
+                    <span id="oldDataStatus" class="text-sm text-muted">0 old trades stored</span>
                 </div>
             </section>
 
