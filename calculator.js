@@ -171,14 +171,18 @@ class Calculator {
                     let interest = legLoan * (annualRate / 365) * daysHeld;
                     if (isNaN(interest)) interest = 0;
 
-                    const grossPnl = sellVal - buyCost - buyExp - sellExp;
-                    let netPnl = grossPnl - interest;
+                    const grossPnl = sellVal - buyCost;
+                    const totalCharges = buyExp + sellExp;
+                    const netPnlTaxOnly = grossPnl - totalCharges;
+                    let netPnlTotal = netPnlTaxOnly - interest;
                     if (isNaN(netPnl)) netPnl = 0;
 
-                    pos.realizedPnL += netPnl;
+                    pos.realizedPnL += netPnlTotal;
 
                     closedPos.grossPnL = (closedPos.grossPnL || 0) + grossPnl;
-                    closedPos.realizedPnL += netPnl;
+                    closedPos.totalCharges = (closedPos.totalCharges || 0) + totalCharges;
+                    closedPos.netPnlTaxOnly = (closedPos.netPnlTaxOnly || 0) + netPnlTaxOnly;
+                    closedPos.realizedPnL += netPnlTotal;
                     closedPos.totalInterest = (closedPos.totalInterest || 0) + interest;
                     closedPos.totalClosedQty += matchedQty;
 
@@ -259,7 +263,9 @@ class Calculator {
                 const sellVal = matchedQty * avgSellPrice;
                 const sellCharges = matchedQty * avgSellExp;
 
-                const grossPnl = sellVal - buyCost - buyCharges - sellCharges;
+                const grossPnl = sellVal - buyCost;
+                const totalCharges = buyCharges + sellCharges;
+                const netPnlTaxOnly = grossPnl - totalCharges;
 
                 // Update Closed Position Stats
                 if (!closedPositions[group.symbol]) {
@@ -275,7 +281,10 @@ class Calculator {
                 const cp = closedPositions[group.symbol];
 
                 // Add to totals
-                cp.realizedPnL += grossPnl;
+                cp.realizedPnL += netPnlTaxOnly;
+                cp.grossPnL = (cp.grossPnL || 0) + grossPnl;
+                cp.totalCharges = (cp.totalCharges || 0) + totalCharges;
+                cp.netPnlTaxOnly = (cp.netPnlTaxOnly || 0) + netPnlTaxOnly;
                 cp.totalClosedQty += matchedQty; // Technically it's volume, but for PnL summary effectively closed
                 cp.intradayPnL = (cp.intradayPnL || 0) + grossPnl;
                 cp.intradayQty = (cp.intradayQty || 0) + matchedQty;

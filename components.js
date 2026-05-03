@@ -183,13 +183,14 @@ class Components {
         const totalPnL = positions.reduce((sum, p) => sum + p.realizedPnL, 0);
         const totalInterest = positions.reduce((sum, p) => sum + (p.totalInterest || 0), 0);
 
-        // Calculate Split Totals
-        const totalIntradayPnL = positions.reduce((sum, p) => sum + (p.intradayPnL || 0), 0);
-        const totalDeliveryPnL = totalPnL - totalIntradayPnL;
-
         const totalPnLColor = totalPnL >= 0 ? 'var(--success)' : 'var(--warning)';
-        const deliveryColor = totalDeliveryPnL >= 0 ? 'var(--success)' : 'var(--warning)';
-        const intradayColor = totalIntradayPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+
+        const totalGross = positions.reduce((sum, p) => sum + (p.grossPnL || 0), 0);
+        const totalCharges = positions.reduce((sum, p) => sum + (p.totalCharges || 0), 0);
+        const totalNetTaxOnly = positions.reduce((sum, p) => sum + (p.netPnlTaxOnly || 0), 0);
+
+        const grossColor = totalGross >= 0 ? 'var(--success)' : 'var(--warning)';
+        const netTaxColor = totalNetTaxOnly >= 0 ? 'var(--success)' : 'var(--warning)';
 
         let html = `
             <table>
@@ -197,10 +198,11 @@ class Components {
                     <tr>
                         <th style="width: 200px; cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'symbol')">Symbol${getSortArrow('symbol')}</th>
                         <th class="num">Closed Qty</th>
-                        <th class="num">Delivery P&L</th>
-                        <th class="num">Intraday P&L</th>
+                        <th class="num" title="Sell Value - Buy Value">Gross P&L</th>
+                        <th class="num" title="Estimated Brokerage, STT, Txn">Taxes & Charges</th>
+                        <th class="num" title="Gross P&L - Taxes">P&L (Tax Only)</th>
                         <th class="num">Total Interest</th>
-                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'realizedPnL')">Net P&L${getSortArrow('realizedPnL')}</th>
+                        <th class="num" style="cursor: pointer; user-select: none;" onclick="APP.toggleSort('closed', 'realizedPnL')" title="Final Net P&L after all charges and interest">Net P&L (Total)${getSortArrow('realizedPnL')}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -208,9 +210,10 @@ class Components {
                     <tr style="background-color: rgba(255,255,255,0.05); font-weight: bold; border-bottom: 2px solid var(--border-color);">
                         <td style="padding: 1rem 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Total Realized</td>
                         <td></td>
-                        <td class="num" style="color: ${deliveryColor};">${this.formatCurrency(totalDeliveryPnL)}</td>
-                        <td class="num" style="color: ${intradayColor};">${this.formatCurrency(totalIntradayPnL)}</td>
-                        <td class="num" style="color: var(--warning);">${this.formatCurrency(totalInterest)}</td>
+                        <td class="num" style="color: ${grossColor};">${this.formatCurrency(totalGross)}</td>
+                        <td class="num" style="color: var(--warning);">( ${this.formatCurrency(totalCharges)} )</td>
+                        <td class="num" style="color: ${netTaxColor};">${this.formatCurrency(totalNetTaxOnly)}</td>
+                        <td class="num" style="color: var(--warning);">( ${this.formatCurrency(totalInterest)} )</td>
                         <td class="num" style="color: ${totalPnLColor}; font-size: 1.1em;">${this.formatCurrency(totalPnL)}</td>
                     </tr>
         `;
@@ -245,8 +248,9 @@ class Components {
                         </div>
                     </td>
                     <td class="num">${pos.qty}</td>
-                    <td class="num" style="color: ${dColor}; opacity: ${dPnL !== 0 ? 1 : 0.5}">${dText}</td>
-                    <td class="num" style="color: ${iColor}; opacity: ${iPnL !== 0 ? 1 : 0.5}">${iText}</td>
+                    <td class="num" style="color: ${(pos.grossPnL||0) >= 0 ? 'var(--success)' : 'var(--warning)'};">${this.formatCurrency(pos.grossPnL || 0)}</td>
+                    <td class="num" style="color: var(--warning); opacity: 0.8;">${this.formatCurrency(pos.totalCharges || 0)}</td>
+                    <td class="num" style="color: ${(pos.netPnlTaxOnly||0) >= 0 ? 'var(--success)' : 'var(--warning)'};">${this.formatCurrency(pos.netPnlTaxOnly || 0)}</td>
                     <td class="num" style="color: var(--warning);">${this.formatCurrency(pos.totalInterest || 0)}</td>
                     <td class="num" style="color: ${pnlColor}; font-weight:bold;">${this.formatCurrency(pos.realizedPnL)}</td>
                 </tr>
