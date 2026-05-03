@@ -95,7 +95,7 @@ rows.forEach(r => {
     const ourNetPnlWithoutInterest = grossPnl - buyCharges - sellCharges;
     
     // Interest is qty * buyRate * fundedRatio * rate/365 * days
-    const fundedRatio = 1.0;
+    const fundedRatio = CONFIG.fundedRatio || 1.0;
     const interest = isIntraday ? 0 : (r.buyValue + buyCharges) * fundedRatio * (CONFIG.mtfInterestRate / 365) * r.days;
     
     totalBrokerPnl += r.realisedPnl;

@@ -163,7 +163,7 @@ class Calculator {
                     daysHeld = Math.max(0, daysHeld);
 
                     const annualRate = CONFIG.mtfInterestRate;
-                    const fundedRatio = configOverrides.fundedRatio || 1.0;
+                    const fundedRatio = configOverrides.fundedRatio !== undefined ? configOverrides.fundedRatio : (CONFIG.fundedRatio !== undefined ? CONFIG.fundedRatio : 1.0);
 
                     const legDebit = buyCost + buyExp;
                     const legLoan = legDebit * fundedRatio;
@@ -175,7 +175,7 @@ class Calculator {
                     const totalCharges = buyExp + sellExp;
                     const netPnlTaxOnly = grossPnl - totalCharges;
                     let netPnlTotal = netPnlTaxOnly - interest;
-                    if (isNaN(netPnl)) netPnl = 0;
+                    if (isNaN(netPnlTotal)) netPnlTotal = 0;
 
                     pos.realizedPnL += netPnlTotal;
 
@@ -194,7 +194,9 @@ class Calculator {
                         sellDate: trade.date,
                         sellPrice: trade.price,
                         grossPnl: grossPnl,
-                        pnl: netPnl,
+                        charges: totalCharges,
+                        netPnlTaxOnly: netPnlTaxOnly,
+                        pnl: netPnlTotal,
                         daysHeld: daysHeld,
                         interest: interest,
                         type: 'MTF'
@@ -313,7 +315,7 @@ class Calculator {
         // Constants for Interest Calc
         const today = new Date();
         const oneDay = 24 * 60 * 60 * 1000;
-        const fundedRatio = configOverrides.fundedRatio || 1.0;
+        const fundedRatio = configOverrides.fundedRatio !== undefined ? configOverrides.fundedRatio : (CONFIG.fundedRatio !== undefined ? CONFIG.fundedRatio : 1.0);
         const interestDelay = configOverrides.interestDelay || 0;
         const annualRate = CONFIG.mtfInterestRate;
         const customTargetPct = configOverrides.customTarget || 10;

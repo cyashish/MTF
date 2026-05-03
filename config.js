@@ -5,6 +5,7 @@ const CONFIG = {
     brokerageIntraday: 0.0003, // 0.03% (Intraday)
     sttIntraday: 0.00025,      // 0.025% on sell value (Intraday)
     mtfInterestRate: 0.18,    // 18% p.a.
+    fundedRatio: 0.314,       // 31.4% funded by MTF loan (based on actual interest paid)
     sttSell: 0.001,           // 0.1% on sell value
     txnCharge: 0.0000325,     // 0.00325%
     sebiCharge: 0.000001,      // 0.0001% (₹10/crore)
