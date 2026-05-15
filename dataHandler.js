@@ -3,25 +3,117 @@ class DataHandler {
         if (!input || input.trim().length === 0) return [];
 
         const cleaned = input.trim();
+        const firstLine = cleaned.split(/\r?\n/)[0] || '';
 
-        // Detect format
-        // 1. New Ledger Format: Starts with NSE/BSE followed by data on the same line
-        // Regex check for: Start of line -> NSE/BSE -> Whitespace -> Date/Something (not just newline)
+        // 1. Broker contract-note export (tab header with Net Rate / Brokerage Per Share)
+        if (this.isContractNoteExport(firstLine)) {
+            const contractTrades = this.parseContractNoteTSV(cleaned);
+            if (contractTrades.length > 0) return contractTrades;
+        }
+
+        // 2. Ledger lines: NSE/BSE ... D/T B/S qty price [bps] netRate
         const hasLedgerSignature = cleaned.split('\n').some(l => /^(NSE|BSE)\s+\S+/i.test(l.trim()));
 
         if (hasLedgerSignature) {
             return this.parseLedgerFormat(cleaned);
         }
 
-        // 2. CSV/TSV with potential headers
+        // 3. Generic CSV/TSV with potential headers
         if (cleaned.includes('\t') || cleaned.includes(',')) {
             // Check if it really has headers we recognize
             const trades = this.parseCSV(cleaned);
             if (trades.length > 0) return trades;
         }
 
-        // 3. Fallback: Vertical block format (legacy)
+        // 4. Fallback: Vertical block format (legacy)
         return this.parseVerticalBlocks(cleaned);
+    }
+
+    static isContractNoteExport(headerLine) {
+        const h = headerLine.toLowerCase();
+        return (
+            (h.includes('net rate') || h.includes('netrate')) &&
+            (h.includes('brokerage per share') || h.includes('brokerage')) &&
+            (h.includes('buy/sell') || h.includes('scrip'))
+        );
+    }
+
+    static parseContractNoteTSV(text) {
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) return [];
+
+        const delimiter = lines[0].includes('\t') ? '\t' : ',';
+        const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+
+        const colIdx = (candidates) =>
+            headers.findIndex(h => candidates.some(c => h === c || h.includes(c)));
+
+        const indices = {
+            date: colIdx(['trade date', 'tradedate', 'date']),
+            symbol: colIdx(['scrip symbol', 'scrip', 'symbol']),
+            td: colIdx(['tdind', 'product', 'segment']),
+            side: colIdx(['buy/sell', 'side', 'txn_type']),
+            qty: colIdx(['quantity', 'qty']),
+            price: colIdx(['rate', 'price', 'trade_price']),
+            bps: colIdx(['brokerage per share', 'brokerage/share']),
+            netRate: colIdx(['net rate', 'netrate']),
+        };
+
+        if (indices.symbol < 0 || indices.qty < 0 || indices.price < 0) return [];
+
+        const parseNum = (val) => {
+            if (val == null || val === '') return NaN;
+            return parseFloat(String(val).replace(/,/g, ''));
+        };
+
+        const trades = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(delimiter).map(c => c.trim());
+            if (cols.length < 5) continue;
+
+            const symbol = cols[indices.symbol];
+            if (!symbol || symbol.toLowerCase() === 'exchange') continue;
+
+            const qty = parseNum(cols[indices.qty]);
+            const price = parseNum(cols[indices.price]);
+            if (isNaN(qty) || isNaN(price) || qty <= 0) continue;
+
+            const sideRaw = indices.side > -1 ? cols[indices.side] : 'B';
+            const isBuy = sideRaw.trim().toUpperCase().startsWith('B');
+
+            let expenses = null;
+            if (indices.bps > -1) {
+                const bps = parseNum(cols[indices.bps]);
+                if (!isNaN(bps) && bps >= 0.01) expenses = bps;
+            }
+            if (expenses == null && indices.netRate > -1) {
+                const netRate = parseNum(cols[indices.netRate]);
+                if (!isNaN(netRate)) {
+                    const diff = isBuy ? netRate - price : price - netRate;
+                    if (diff >= 0.01) expenses = diff;
+                }
+            }
+
+            let orderType = 'MTF';
+            if (indices.td > -1) {
+                const td = cols[indices.td].trim().toUpperCase();
+                if (td === 'T' || td === 'MIS') orderType = 'MIS';
+                else if (td === 'D' || td === 'MTF' || td === 'CNC') orderType = 'MTF';
+            }
+
+            trades.push({
+                date: indices.date > -1 ? cols[indices.date] : new Date().toISOString(),
+                symbol,
+                side: isBuy ? 'BUY' : 'SELL',
+                qty,
+                price,
+                expenses,
+                orderType,
+            });
+        }
+
+        return trades;
     }
 
     static parseCSV(text) {

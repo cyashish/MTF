@@ -83,7 +83,7 @@ class Calculator {
             const closedPos = closedPositions[trade.symbol];
 
             if (trade.side === 'BUY') {
-                // Calculation matches previous logic
+                // expenses = brokerage per share (from contract note or net rate − price)
                 let brokerageAmount = 0;
                 if (trade.expenses != null && trade.expenses > 0) {
                     brokerageAmount = trade.expenses * trade.qty;
@@ -91,19 +91,12 @@ class Calculator {
                     brokerageAmount = (trade.qty * trade.price) * CONFIG.brokerage;
                 }
 
-                // Calculate Delivery Charges (Buy)
-                // STT on Delivery Buy = 0.1%
-                const stt = (trade.qty * trade.price) * 0.001;
-
-                // We restart standard calculation excluding STT to avoid double calc if we used helper
-                // Actually, let's just use a clean calculation block here
-                const turnover = trade.qty * trade.price;
-                const txn = turnover * CONFIG.txnCharge;
-                const sebi = turnover * CONFIG.sebiCharge;
-                const stamp = turnover * CONFIG.stampDuty; // Buy side stamp
-                const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
-
-                const charges = brokerageAmount + stt + txn + sebi + stamp + gst;
+                const charges = this.estimateDeliveryCharges(
+                    trade.qty,
+                    trade.price,
+                    brokerageAmount,
+                    'BUY'
+                );
 
                 pos.buyQueue.push({
                     qty: trade.qty,
@@ -119,19 +112,19 @@ class Calculator {
                 // SELL
                 let qtyToSell = trade.qty;
 
-                // Validate Expenses
-                let totalSellCharges = 0;
+                let brokerageAmount = 0;
                 if (trade.expenses != null && trade.expenses > 0) {
-                    totalSellCharges = trade.expenses * trade.qty;
+                    brokerageAmount = trade.expenses * trade.qty;
                 } else {
-                    const turnover = trade.qty * trade.price;
-                    const brokerage = turnover * CONFIG.brokerage;
-                    const stt = turnover * CONFIG.sttSell;
-                    const txn = turnover * CONFIG.txnCharge;
-                    const sebi = turnover * CONFIG.sebiCharge;
-                    const gst = (brokerage + txn + sebi) * CONFIG.gst;
-                    totalSellCharges = brokerage + stt + txn + sebi + gst;
+                    brokerageAmount = (trade.qty * trade.price) * CONFIG.brokerage;
                 }
+
+                const totalSellCharges = this.estimateDeliveryCharges(
+                    trade.qty,
+                    trade.price,
+                    brokerageAmount,
+                    'SELL'
+                );
                 let sellExpensesPerUnit = totalSellCharges / trade.qty;
 
                 while (qtyToSell > 0 && pos.buyQueue.length > 0) {
@@ -237,11 +230,13 @@ class Calculator {
                 let totalBuyExp = 0;
                 group.buys.forEach(t => {
                     totalBuyVal += t.qty * t.price;
-                    // Calculate expenses if missing
                     if (t.expenses === null || t.expenses === undefined) {
-                        t.expenses = this.estimateIntradayCharges(t.qty, t.price, 'BUY') / t.qty;
+                        totalBuyExp += this.estimateIntradayCharges(t.qty, t.price, 'BUY');
+                    } else {
+                        totalBuyExp += this.estimateIntradayChargesFromBrokerage(
+                            t.qty, t.price, 'BUY', t.expenses * t.qty
+                        );
                     }
-                    totalBuyExp += t.qty * t.expenses;
                 });
                 const avgBuyPrice = totalBuyVal / totalBuyQty;
                 const avgBuyExp = totalBuyExp / totalBuyQty;
@@ -252,9 +247,12 @@ class Calculator {
                 group.sells.forEach(t => {
                     totalSellVal += t.qty * t.price;
                     if (t.expenses === null || t.expenses === undefined) {
-                        t.expenses = this.estimateIntradayCharges(t.qty, t.price, 'SELL') / t.qty;
+                        totalSellExp += this.estimateIntradayCharges(t.qty, t.price, 'SELL');
+                    } else {
+                        totalSellExp += this.estimateIntradayChargesFromBrokerage(
+                            t.qty, t.price, 'SELL', t.expenses * t.qty
+                        );
                     }
-                    totalSellExp += t.qty * t.expenses;
                 });
                 const avgSellPrice = totalSellVal / totalSellQty;
                 const avgSellExp = totalSellExp / totalSellQty;
@@ -414,6 +412,32 @@ class Calculator {
             });
 
         return { openPositions: openResults, closedPositions: closedResults };
+    }
+
+    static estimateDeliveryCharges(qty, price, brokerageAmount, side) {
+        const turnover = qty * price;
+        const txn = turnover * CONFIG.txnCharge;
+        const sebi = turnover * CONFIG.sebiCharge;
+        const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
+
+        if (side === 'BUY') {
+            const stt = turnover * 0.001;
+            const stamp = turnover * CONFIG.stampDuty;
+            return brokerageAmount + stt + txn + sebi + stamp + gst;
+        }
+
+        const stt = turnover * CONFIG.sttSell;
+        return brokerageAmount + stt + txn + sebi + gst;
+    }
+
+    static estimateIntradayChargesFromBrokerage(qty, price, side, brokerageAmount) {
+        const turnover = qty * price;
+        const stt = side === 'SELL' ? turnover * CONFIG.sttIntraday : 0;
+        const txn = turnover * CONFIG.txnCharge;
+        const sebi = turnover * CONFIG.sebiCharge;
+        const stamp = side === 'BUY' ? turnover * 0.00003 : 0;
+        const gst = (brokerageAmount + txn + sebi) * CONFIG.gst;
+        return brokerageAmount + stt + txn + sebi + stamp + gst;
     }
 
     static calculateTaxesOnly(qty, price, brokerageAmount, isDelivery = true) {
