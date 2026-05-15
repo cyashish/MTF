@@ -85,7 +85,7 @@ class Calculator {
             if (trade.side === 'BUY') {
                 // Calculation matches previous logic
                 let brokerageAmount = 0;
-                if (trade.expenses || trade.expenses === 0) {
+                if (trade.expenses != null && trade.expenses > 0) {
                     brokerageAmount = trade.expenses * trade.qty;
                 } else {
                     brokerageAmount = (trade.qty * trade.price) * CONFIG.brokerage;
@@ -121,7 +121,7 @@ class Calculator {
 
                 // Validate Expenses
                 let totalSellCharges = 0;
-                if (trade.expenses || trade.expenses === 0) {
+                if (trade.expenses != null && trade.expenses > 0) {
                     totalSellCharges = trade.expenses * trade.qty;
                 } else {
                     const turnover = trade.qty * trade.price;
@@ -300,7 +300,7 @@ class Calculator {
                     sellDate: group.date,
                     sellPrice: avgSellPrice,
                     grossPnl: grossPnl,
-                    pnl: grossPnl, // No interest on intraday
+                    pnl: netPnlTaxOnly,
                     daysHeld: 0,
                     interest: 0,
                     type: 'MIS' // Marker
@@ -396,15 +396,22 @@ class Calculator {
         // Filter out symbols with no closed trades
         const closedResults = Object.values(closedPositions)
             .filter(cp => cp.totalClosedQty > 0)
-            .map(cp => ({
-                symbol: cp.symbol,
-                qty: cp.totalClosedQty,
-                grossPnL: cp.grossPnL || 0,
-                realizedPnL: cp.realizedPnL,
-                intradayPnL: cp.intradayPnL || 0, // Exposed for UI
-                totalInterest: cp.totalInterest || 0,
-                legs: cp.legs
-            }));
+            .map(cp => {
+                const totalCharges = cp.totalCharges || 0;
+                const netPnlTaxOnly = cp.netPnlTaxOnly || 0;
+                const totalInterest = cp.totalInterest || 0;
+                return {
+                    symbol: cp.symbol,
+                    qty: cp.totalClosedQty,
+                    grossPnL: cp.grossPnL || 0,
+                    totalCharges,
+                    netPnlTaxOnly,
+                    totalInterest,
+                    realizedPnL: netPnlTaxOnly - totalInterest,
+                    intradayPnL: cp.intradayPnL || 0,
+                    legs: cp.legs
+                };
+            });
 
         return { openPositions: openResults, closedPositions: closedResults };
     }

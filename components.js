@@ -178,16 +178,14 @@ class Components {
             return sortConfig.dir === 'asc' ? ' ▲' : ' ▼';
         };
 
-        // Calculate Totals
-        const totalGrossPnL = positions.reduce((sum, p) => sum + (p.grossPnL || 0), 0);
-        const totalPnL = positions.reduce((sum, p) => sum + p.realizedPnL, 0);
-        const totalInterest = positions.reduce((sum, p) => sum + (p.totalInterest || 0), 0);
-
-        const totalPnLColor = totalPnL >= 0 ? 'var(--success)' : 'var(--warning)';
-
+        // Calculate Totals (Net = Gross - Taxes - Interest)
         const totalGross = positions.reduce((sum, p) => sum + (p.grossPnL || 0), 0);
         const totalCharges = positions.reduce((sum, p) => sum + (p.totalCharges || 0), 0);
         const totalNetTaxOnly = positions.reduce((sum, p) => sum + (p.netPnlTaxOnly || 0), 0);
+        const totalInterest = positions.reduce((sum, p) => sum + (p.totalInterest || 0), 0);
+        const totalPnL = totalGross - totalCharges - totalInterest;
+
+        const totalPnLColor = totalPnL >= 0 ? 'var(--success)' : 'var(--warning)';
 
         const grossColor = totalGross >= 0 ? 'var(--success)' : 'var(--warning)';
         const netTaxColor = totalNetTaxOnly >= 0 ? 'var(--success)' : 'var(--warning)';
@@ -225,11 +223,12 @@ class Components {
             const toggleBtn = `<span style="display:inline-block; width:20px; text-align:center; cursor:pointer; font-weight:bold; color:var(--accent-primary); margin-right:5px; user-select:none; font-size:1.2em;" 
                          onclick="document.getElementById('${drillId}').classList.toggle('hidden'); this.textContent = this.textContent === '+' ? '-' : '+'">+</span>`;
 
-            const pnlColor = pos.realizedPnL >= 0 ? 'var(--success)' : 'var(--warning)';
+            const netPnL = (pos.netPnlTaxOnly || 0) - (pos.totalInterest || 0);
+            const pnlColor = netPnL >= 0 ? 'var(--success)' : 'var(--warning)';
 
             // Split PnL for Row
             const iPnL = pos.intradayPnL || 0;
-            const dPnL = pos.realizedPnL - iPnL;
+            const dPnL = netPnL - iPnL;
 
             const iColor = iPnL >= 0 ? 'var(--success)' : 'var(--warning)';
             const dColor = dPnL >= 0 ? 'var(--success)' : 'var(--warning)';
@@ -252,14 +251,14 @@ class Components {
                     <td class="num" style="color: var(--warning); opacity: 0.8;">${this.formatCurrency(pos.totalCharges || 0)}</td>
                     <td class="num" style="color: ${(pos.netPnlTaxOnly||0) >= 0 ? 'var(--success)' : 'var(--warning)'};">${this.formatCurrency(pos.netPnlTaxOnly || 0)}</td>
                     <td class="num" style="color: var(--warning);">${this.formatCurrency(pos.totalInterest || 0)}</td>
-                    <td class="num" style="color: ${pnlColor}; font-weight:bold;">${this.formatCurrency(pos.realizedPnL)}</td>
+                    <td class="num" style="color: ${pnlColor}; font-weight:bold;">${this.formatCurrency(netPnL)}</td>
                 </tr>
             `;
 
             // Drill Down row
             let legsHtml = `
                 <tr id="${drillId}" class="hidden" style="background-color: rgba(255, 255, 255, 0.03);">
-                    <td colspan="6" style="padding: 0;">
+                    <td colspan="7" style="padding: 0;">
                         <div style="padding: 0.5rem 0.5rem 0.5rem 3.5rem; border-left: 2px solid var(--accent-primary);">
                             <table style="width: 100%; font-size: 0.8rem; opacity: 0.9;">
                                 <thead>
