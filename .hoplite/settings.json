@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "ports": {"preview": 3000, "additional": {}},
+  "scripts": {
+    "setup": {"enabled": true, "command": "git lfs version >/dev/null 2>&1 || (apt-get update >/dev/null && apt-get install -y git-lfs >/dev/null)"},
+    "run": {"enabled": true, "command": null},
+    "archive": {"enabled": true, "command": null},
+    "check": {"enabled": true, "command": "node --test"}
+  },
+  "mcpServers": []
+}
