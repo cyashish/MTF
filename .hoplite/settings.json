@@ -2,7 +2,10 @@
   "version": 1,
   "ports": {"preview": 3000, "additional": {}},
   "scripts": {
-    "setup": {"enabled": true, "command": null},
+    "setup": {
+      "enabled": true,
+      "command": "apt-get update && apt-get install -y git-lfs"
+    },
     "run": {"enabled": true, "command": "python3 -m http.server 3000"},
     "archive": {"enabled": true, "command": null},
     "check": {"enabled": true, "command": null}
