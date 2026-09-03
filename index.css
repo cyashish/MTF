@@ -208,6 +208,12 @@ tr:hover {
     color: var(--text-primary);
 }
 
+/* Transient confirmation after a copy action */
+button.copied {
+    color: var(--success);
+    border-color: var(--success);
+}
+
 /* Utility */
 .hidden {
     display: none !important;

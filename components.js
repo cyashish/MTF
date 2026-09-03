@@ -87,7 +87,7 @@ class Components {
                     <td class="num" style="color: var(--success); font-weight:bold;">${target5}</td>
                     <td class="num" style="color: var(--accent-primary); font-weight:bold;">${targetCustom}</td>
                     <td>
-                        <button class="btn-icon" onclick="APP.copyRow('${pos.symbol}', ${pos.qty}, ${pos.breakevenPrice.toFixed(2)})" title="Copy Sell Order">
+                        <button class="btn-icon" onclick="APP.copyRow('${pos.symbol}', ${pos.qty}, ${pos.breakevenPrice.toFixed(2)}, this)" title="Copy Sell Order">
                             📋
                         </button>
                     </td>

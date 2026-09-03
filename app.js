@@ -317,17 +317,24 @@ const APP = {
 
             window.APP_STATE.rawTrades = rawTrades; // Save for recalculation
 
-            // Default calculation (100% funding, 0 delay) unless changed
-            const { openPositions, closedPositions } = Calculator.processTrades(rawTrades);
+            // Use the custom target currently set in the UI
+            const customTarget = parseFloat(document.getElementById('customTarget')?.value) || 10;
+            const { openPositions, closedPositions } = Calculator.processTrades(rawTrades, { customTarget });
             window.APP_STATE.positions = openPositions;
             window.APP_STATE.closedPositions = closedPositions;
 
             // 3. Render
-            this.renderDashboard(openPositions, closedPositions);
+            this.renderDashboard(openPositions, closedPositions, customTarget);
 
             const totalPos = openPositions.length;
             const closedCount = closedPositions.length;
             status.innerHTML = `<span class="positive">Processed ${rawTrades.length} trades. Open: ${totalPos}, Closed: ${closedCount}.</span>`;
+
+            // Bring the results into view — the button stays at the top of the page
+            const dashboard = document.getElementById('dashboard');
+            if (dashboard && !dashboard.classList.contains('hidden')) {
+                dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
 
             // Start Live Price Polling
             this.startPolling();
@@ -504,31 +511,77 @@ const APP = {
         }
     },
 
-    copyRow(symbol, qty, price) {
+    // Clipboard writes: async API first, execCommand fallback for file:// and older browsers
+    async copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (e) { /* fall through to the legacy path */ }
+        }
+
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+            ok = document.execCommand('copy');
+        } catch (e) {
+            ok = false;
+        }
+        document.body.removeChild(ta);
+        return ok;
+    },
+
+    showCopyFeedback(btn, ok, label) {
+        const status = document.getElementById('statusMsg');
+
+        if (label) {
+            status.innerHTML = ok
+                ? `<span class="positive">Copied ${label} to clipboard.</span>`
+                : '<span class="negative">Copy failed. Select and copy manually.</span>';
+        } else if (!ok) {
+            status.innerHTML = '<span class="negative">Copy failed. Select and copy manually.</span>';
+        }
+
+        if (!btn) return;
+        const originalText = btn.textContent;
+        btn.classList.add('copied');
+        btn.textContent = ok ? '✓' : '✗';
+        setTimeout(() => {
+            if (btn.isConnected) {
+                btn.classList.remove('copied');
+                btn.textContent = originalText;
+            }
+        }, 1500);
+    },
+
+    async copyRow(symbol, qty, price, btn) {
         // Format: EXCH, SYMBOL, SELL, QTY, PRICE, PRODUCT
         // Price is Breakeven Price
         const text = `NSE,${symbol},SELL,${qty},${price},MTF`;
-
-        navigator.clipboard.writeText(text).then(() => {
-            console.log('Copied:', text);
-        }).catch(err => {
-            console.error('Failed to copy', err);
-        });
+        const ok = await this.copyText(text);
+        this.showCopyFeedback(btn, ok, `${symbol} sell order`);
     },
 
-    copyAll() {
+    async copyAll(btn) {
         const positions = window.APP_STATE.positions;
-        if (!positions || positions.length === 0) return;
+        if (!positions || positions.length === 0) {
+            document.getElementById('statusMsg').innerHTML = '<span class="negative">No open positions to copy.</span>';
+            return;
+        }
 
         const lines = positions.map(p => {
             return `NSE,${p.symbol},SELL,${p.qty},${p.breakevenPrice.toFixed(2)},MTF`;
         });
 
         const text = lines.join('\n');
-
-        navigator.clipboard.writeText(text).then(() => {
-            alert(`Copied ${lines.length} sell orders to clipboard!`);
-        });
+        const ok = await this.copyText(text);
+        this.showCopyFeedback(btn, ok, `${lines.length} sell orders`);
     }
 };
 
