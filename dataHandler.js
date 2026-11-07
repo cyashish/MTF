@@ -1,4 +1,34 @@
 class DataHandler {
+    /**
+     * Convert an Excel file (ArrayBuffer) to CSV text.
+     * Returns the CSV string from the first sheet, or null if not a valid workbook.
+     */
+    static excelToCSV(arrayBuffer) {
+        try {
+            if (typeof XLSX === 'undefined') {
+                console.error('SheetJS (XLSX) library not loaded');
+                return null;
+            }
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            if (!firstSheetName) return null;
+            const sheet = workbook.Sheets[firstSheetName];
+            return XLSX.utils.sheet_to_csv(sheet);
+        } catch (e) {
+            console.warn('Failed to parse as Excel:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Check if a filename has an Excel extension.
+     */
+    static isExcelFile(filename) {
+        if (!filename) return false;
+        const ext = filename.split('.').pop().toLowerCase();
+        return ext === 'xlsx' || ext === 'xls';
+    }
+
     static async parseInput(input) {
         if (!input || input.trim().length === 0) return [];
 

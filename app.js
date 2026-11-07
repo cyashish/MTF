@@ -175,13 +175,27 @@ const APP = {
         const status = document.getElementById('statusMsg');
         status.innerHTML = 'Reading file...';
 
+        const isExcel = DataHandler.isExcelFile(file.name);
+
         const reader = new FileReader();
         reader.onload = async (e) => {
-            const content = e.target.result;
             try {
+                let content;
+                if (isExcel) {
+                    // Convert Excel ArrayBuffer to CSV text
+                    const arrayBuffer = e.target.result;
+                    content = DataHandler.excelToCSV(new Uint8Array(arrayBuffer));
+                    if (!content) {
+                        throw new Error("Could not read Excel file. Make sure it's a valid .xlsx or .xls file.");
+                    }
+                    console.log('Excel converted to CSV, first 500 chars:', content.substring(0, 500));
+                } else {
+                    content = e.target.result;
+                }
+
                 const rawTrades = await DataHandler.parseInput(content);
                 if (rawTrades.length === 0) {
-                    throw new Error("No valid trades found in file.");
+                    throw new Error("No valid trades found in file. Check the format and column headers.");
                 }
                 
                 let storedTrades = rawTrades;
@@ -207,7 +221,12 @@ const APP = {
             status.innerHTML = `<span class="negative">Error reading file.</span>`;
             event.target.value = '';
         };
-        reader.readAsText(file);
+        // Read as ArrayBuffer for Excel, as text for CSV/TXT
+        if (isExcel) {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsText(file);
+        }
     },
 
     handleClearOld() {
