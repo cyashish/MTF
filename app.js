@@ -6,6 +6,8 @@ const APP = {
 
         // Event Listeners
         document.getElementById('btnProcess').addEventListener('click', this.handleProcess.bind(this));
+        document.getElementById('btnUploadMain')?.addEventListener('click', () => document.getElementById('mainFileInput')?.click());
+        document.getElementById('mainFileInput')?.addEventListener('change', this.handleUploadMain.bind(this));
         document.getElementById('btnStoreOld')?.addEventListener('click', this.handleStoreOld.bind(this));
         document.getElementById('btnClearOld')?.addEventListener('click', this.handleClearOld.bind(this));
         
@@ -168,6 +170,67 @@ const APP = {
         }
     },
 
+    async handleUploadMain(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const spinner = document.getElementById('loadingSpinner');
+        const status = document.getElementById('statusMsg');
+        spinner?.classList.remove('hidden');
+        status.textContent = `Reading ${file.name}...`;
+
+        try {
+            const isExcel = DataHandler.isExcelFile(file.name);
+            let content;
+            if (isExcel) {
+                const arrayBuffer = await file.arrayBuffer();
+                content = DataHandler.excelToCSV(new Uint8Array(arrayBuffer));
+                if (!content) {
+                    throw new Error("Could not read Excel file. Please ensure it is a valid .xlsx or .xls file.");
+                }
+            } else {
+                content = await file.text();
+            }
+
+            const currentTrades = await DataHandler.parseInput(content);
+            if (currentTrades.length === 0) {
+                throw new Error("No valid trades found in file. Check format and column headers.");
+            }
+
+            let rawTrades = [...currentTrades];
+            const oldDataStr = localStorage.getItem('mtf_old_trades');
+            if (oldDataStr) {
+                try {
+                    const oldTrades = JSON.parse(oldDataStr);
+                    rawTrades = oldTrades.concat(rawTrades);
+                } catch(e) {
+                    console.error("Error reading old trades", e);
+                }
+            }
+
+            window.APP_STATE.rawTrades = rawTrades;
+
+            // Calculate
+            const { openPositions, closedPositions } = Calculator.processTrades(rawTrades);
+            window.APP_STATE.positions = openPositions;
+            window.APP_STATE.closedPositions = closedPositions;
+
+            // Render
+            this.renderDashboard(openPositions, closedPositions);
+
+            status.innerHTML = `<span class="positive">Processed ${file.name} (${currentTrades.length} trades). Open: ${openPositions.length}, Closed: ${closedPositions.length}.</span>`;
+
+            // Start Live Price Polling
+            this.startPolling();
+        } catch (e) {
+            console.error(e);
+            status.innerHTML = `<span class="negative">Error: ${e.message}</span>`;
+        } finally {
+            spinner?.classList.add('hidden');
+            event.target.value = '';
+        }
+    },
+
     async handleUploadOld(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -175,57 +238,45 @@ const APP = {
         const status = document.getElementById('statusMsg');
         status.innerHTML = 'Reading file...';
 
-        const isExcel = DataHandler.isExcelFile(file.name);
-
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                let content;
-                if (isExcel) {
-                    // Convert Excel ArrayBuffer to CSV text
-                    const arrayBuffer = e.target.result;
-                    content = DataHandler.excelToCSV(new Uint8Array(arrayBuffer));
-                    if (!content) {
-                        throw new Error("Could not read Excel file. Make sure it's a valid .xlsx or .xls file.");
-                    }
-                    console.log('Excel converted to CSV, first 500 chars:', content.substring(0, 500));
-                } else {
-                    content = e.target.result;
+        try {
+            const isExcel = DataHandler.isExcelFile(file.name);
+            let content;
+            if (isExcel) {
+                const arrayBuffer = await file.arrayBuffer();
+                content = DataHandler.excelToCSV(new Uint8Array(arrayBuffer));
+                if (!content) {
+                    throw new Error("Could not read Excel file. Make sure it's a valid .xlsx or .xls file.");
                 }
-
-                const rawTrades = await DataHandler.parseInput(content);
-                if (rawTrades.length === 0) {
-                    throw new Error("No valid trades found in file. Check the format and column headers.");
-                }
-                
-                let storedTrades = rawTrades;
-                const existingStr = localStorage.getItem('mtf_old_trades');
-                if (existingStr) {
-                    try {
-                        const existing = JSON.parse(existingStr);
-                        storedTrades = existing.concat(rawTrades);
-                    } catch(err) {}
-                }
-                
-                localStorage.setItem('mtf_old_trades', JSON.stringify(storedTrades));
-                this.updateOldDataStatus();
-                status.innerHTML = `<span class="positive">Successfully uploaded and stored ${rawTrades.length} trades as old data (Total: ${storedTrades.length}).</span>`;
-            } catch (err) {
-                console.error(err);
-                status.innerHTML = `<span class="negative">Error parsing file: ${err.message}</span>`;
-            } finally {
-                event.target.value = ''; // Reset to allow re-upload
+            } else {
+                content = await file.text();
             }
-        };
-        reader.onerror = () => {
-            status.innerHTML = `<span class="negative">Error reading file.</span>`;
+
+            const rawTrades = await DataHandler.parseInput(content);
+            if (rawTrades.length === 0) {
+                throw new Error("No valid trades found in file. Check format and column headers.");
+            }
+
+            let storedTrades = rawTrades;
+            const existingStr = localStorage.getItem('mtf_old_trades');
+            if (existingStr) {
+                try {
+                    const existing = JSON.parse(existingStr);
+                    storedTrades = existing.concat(rawTrades);
+                } catch(err) {}
+            }
+
+            localStorage.setItem('mtf_old_trades', JSON.stringify(storedTrades));
+            this.updateOldDataStatus();
+            status.innerHTML = `<span class="positive">Successfully stored ${rawTrades.length} trades as historical data (Total: ${storedTrades.length}).</span>`;
+
+            if (window.APP_STATE.rawTrades && window.APP_STATE.rawTrades.length > 0) {
+                this.recalculate();
+            }
+        } catch (err) {
+            console.error(err);
+            status.innerHTML = `<span class="negative">Error parsing file: ${err.message}</span>`;
+        } finally {
             event.target.value = '';
-        };
-        // Read as ArrayBuffer for Excel, as text for CSV/TXT
-        if (isExcel) {
-            reader.readAsArrayBuffer(file);
-        } else {
-            reader.readAsText(file);
         }
     },
 
@@ -426,6 +477,23 @@ const APP = {
         } else {
             status.textContent = originalText; // revert silently if nothing found
         }
+    },
+
+    getConfigOverrides() {
+        const fundingInput = document.getElementById('fundingRatio');
+        const delayInput = document.getElementById('interestDelay');
+        const customTargetInput = document.getElementById('customTarget');
+
+        let fundedRatio = fundingInput ? parseFloat(fundingInput.value) : (CONFIG.fundedRatio || 0.75);
+        if (isNaN(fundedRatio)) fundedRatio = 0.75;
+
+        let interestDelay = delayInput ? parseInt(delayInput.value) : 0;
+        if (isNaN(interestDelay)) interestDelay = 0;
+
+        let customTarget = customTargetInput ? parseFloat(customTargetInput.value) : 10;
+        if (isNaN(customTarget)) customTarget = 10;
+
+        return { fundedRatio, interestDelay, customTarget };
     },
 
     recalculate() {

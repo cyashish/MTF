@@ -28,6 +28,16 @@ class Calculator {
 
         const isBuy = rawTrade.side.trim().toUpperCase() === 'B' || rawTrade.side.trim().toUpperCase() === 'BUY';
 
+        let normOrderType = 'MTF';
+        if (rawTrade.orderType) {
+            const ot = rawTrade.orderType.trim().toUpperCase();
+            if (ot === 'T' || ot === 'MIS' || ot === 'INTRADAY' || ot === 'DAY') {
+                normOrderType = 'MIS';
+            } else {
+                normOrderType = 'MTF';
+            }
+        }
+
         return {
             date: parseDate(rawTrade.date),
             originalDateStr: rawTrade.date, // Store raw string for debugging
@@ -36,7 +46,7 @@ class Calculator {
             qty: Math.abs(parseNum(rawTrade.qty)),
             price: parseNum(rawTrade.price),
             expenses: rawTrade.expenses, // Pass through explicit expenses (null if missing)
-            orderType: rawTrade.orderType ? rawTrade.orderType.trim().toUpperCase() : 'MTF',
+            orderType: normOrderType,
             raw: rawTrade
         };
     }
@@ -319,8 +329,8 @@ class Calculator {
         const customTargetPct = configOverrides.customTarget || 10;
 
         Object.values(positions).forEach(p => {
-            // Filter out small positions (< 10 qty)
-            if (p.totalOpenQty >= 10) {
+            // Filter out zero/closed positions
+            if (p.totalOpenQty > 0) {
                 let totalCostClean = 0; // Pure share price cost
                 let totalCharges = 0;   // Brokerage/Taxes paid
                 let totalInterest = 0;

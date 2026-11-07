@@ -1,6 +1,6 @@
 class DataHandler {
     /**
-     * Convert an Excel file (ArrayBuffer) to CSV text.
+     * Convert an Excel file (ArrayBuffer or Uint8Array) to CSV text.
      * Returns the CSV string from the first sheet, or null if not a valid workbook.
      */
     static excelToCSV(arrayBuffer) {
@@ -9,7 +9,8 @@ class DataHandler {
                 console.error('SheetJS (XLSX) library not loaded');
                 return null;
             }
-            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const data = arrayBuffer instanceof ArrayBuffer ? new Uint8Array(arrayBuffer) : arrayBuffer;
+            const workbook = XLSX.read(data, { type: 'array' });
             const firstSheetName = workbook.SheetNames[0];
             if (!firstSheetName) return null;
             const sheet = workbook.Sheets[firstSheetName];
@@ -33,24 +34,24 @@ class DataHandler {
         if (!input || input.trim().length === 0) return [];
 
         const cleaned = input.trim();
-        const firstLine = cleaned.split(/\r?\n/)[0] || '';
+        const lines = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) return [];
 
-        // 1. Broker contract-note export (tab header with Net Rate / Brokerage Per Share)
-        if (this.isContractNoteExport(firstLine)) {
+        // 1. Broker contract-note export (tab or comma header with Net Rate / Brokerage Per Share)
+        const hasContractHeader = lines.slice(0, 15).some(l => this.isContractNoteExport(l));
+        if (hasContractHeader) {
             const contractTrades = this.parseContractNoteTSV(cleaned);
             if (contractTrades.length > 0) return contractTrades;
         }
 
         // 2. Ledger lines: NSE/BSE ... D/T B/S qty price [bps] netRate
-        const hasLedgerSignature = cleaned.split('\n').some(l => /^(NSE|BSE)\s+\S+/i.test(l.trim()));
-
+        const hasLedgerSignature = lines.some(l => /^(NSE|BSE)\s+\S+/i.test(l));
         if (hasLedgerSignature) {
             return this.parseLedgerFormat(cleaned);
         }
 
         // 3. Generic CSV/TSV with potential headers
         if (cleaned.includes('\t') || cleaned.includes(',')) {
-            // Check if it really has headers we recognize
             const trades = this.parseCSV(cleaned);
             if (trades.length > 0) return trades;
         }
@@ -60,11 +61,12 @@ class DataHandler {
     }
 
     static isContractNoteExport(headerLine) {
+        if (!headerLine) return false;
         const h = headerLine.toLowerCase();
         return (
             (h.includes('net rate') || h.includes('netrate')) &&
             (h.includes('brokerage per share') || h.includes('brokerage')) &&
-            (h.includes('buy/sell') || h.includes('scrip'))
+            (h.includes('buy/sell') || h.includes('scrip') || h.includes('symbol'))
         );
     }
 
@@ -72,8 +74,12 @@ class DataHandler {
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         if (lines.length < 2) return [];
 
-        const delimiter = lines[0].includes('\t') ? '\t' : ',';
-        const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+        // Locate header line index
+        let headerIdx = lines.findIndex(l => this.isContractNoteExport(l));
+        if (headerIdx < 0) headerIdx = 0;
+
+        const delimiter = lines[headerIdx].includes('\t') ? '\t' : ',';
+        const headers = lines[headerIdx].split(delimiter).map(h => h.trim().toLowerCase());
 
         const colIdx = (candidates) =>
             headers.findIndex(h => candidates.some(c => h === c || h.includes(c)));
@@ -98,7 +104,7 @@ class DataHandler {
 
         const trades = [];
 
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = headerIdx + 1; i < lines.length; i++) {
             const cols = lines[i].split(delimiter).map(c => c.trim());
             if (cols.length < 5) continue;
 
@@ -128,8 +134,8 @@ class DataHandler {
             let orderType = 'MTF';
             if (indices.td > -1) {
                 const td = cols[indices.td].trim().toUpperCase();
-                if (td === 'T' || td === 'MIS') orderType = 'MIS';
-                else if (td === 'D' || td === 'MTF' || td === 'CNC') orderType = 'MTF';
+                if (td === 'T' || td === 'MIS' || td === 'INTRADAY' || td === 'DAY') orderType = 'MIS';
+                else orderType = 'MTF';
             }
 
             trades.push({
@@ -148,11 +154,21 @@ class DataHandler {
 
     static parseCSV(text) {
         const lines = text.split(/\r?\n/).filter(l => l.trim());
-        const delimiter = lines[0].includes('\t') ? '\t' : ',';
+        if (lines.length < 2) return [];
 
-        // Headers
-        const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
         const map = CONFIG.columnMapping;
+
+        // Find header index
+        let headerIdx = lines.findIndex(l => {
+            const lower = l.toLowerCase();
+            return (lower.includes(',') || lower.includes('\t')) &&
+                   map.symbol.some(s => lower.includes(s)) &&
+                   map.qty.some(q => lower.includes(q));
+        });
+        if (headerIdx < 0) headerIdx = 0;
+
+        const delimiter = lines[headerIdx].includes('\t') ? '\t' : ',';
+        const headers = lines[headerIdx].split(delimiter).map(h => h.trim().toLowerCase());
 
         const getIdx = (candidates) => headers.findIndex(h => candidates.some(c => h.includes(c)));
 
@@ -165,61 +181,61 @@ class DataHandler {
             orderType: getIdx(map.orderType)
         };
 
+        if (indices.symbol < 0 || indices.qty < 0 || indices.price < 0) return [];
+
+        const parseNum = (val) => {
+            if (val == null || val === '') return NaN;
+            return parseFloat(String(val).replace(/,/g, ''));
+        };
+
         const trades = [];
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = headerIdx + 1; i < lines.length; i++) {
             const cols = lines[i].split(delimiter).map(c => c.trim());
-            if (cols.length < 5) continue;
+            if (cols.length < 4) continue;
+
+            const symbol = indices.symbol > -1 ? cols[indices.symbol] : '';
+            if (!symbol) continue;
+
+            const qty = parseNum(cols[indices.qty]);
+            const price = parseNum(cols[indices.price]);
+            if (isNaN(qty) || isNaN(price) || qty <= 0) continue;
+
+            let rawSide = indices.side > -1 ? cols[indices.side] : 'BUY';
+            let isBuy = rawSide.trim().toUpperCase().startsWith('B');
+
+            let orderType = 'MTF';
+            if (indices.orderType > -1) {
+                const rawOt = (cols[indices.orderType] || '').trim().toUpperCase();
+                if (rawOt === 'T' || rawOt === 'MIS' || rawOt === 'INTRADAY' || rawOt === 'DAY') {
+                    orderType = 'MIS';
+                } else {
+                    orderType = 'MTF';
+                }
+            }
 
             trades.push({
                 date: indices.date > -1 ? cols[indices.date] : new Date().toISOString(),
-                symbol: indices.symbol > -1 ? cols[indices.symbol] : 'UNKNOWN',
-                side: indices.side > -1 ? cols[indices.side] : 'BUY',
-                qty: indices.qty > -1 ? parseFloat(cols[indices.qty]) : 0,
-                price: indices.price > -1 ? parseFloat(cols[indices.price]) : 0,
-                orderType: indices.orderType > -1 ? cols[indices.orderType] : 'MTF'
+                symbol: symbol.toUpperCase(),
+                side: isBuy ? 'BUY' : 'SELL',
+                qty,
+                price,
+                expenses: null,
+                orderType
             });
         }
         return trades;
     }
 
     static parseLedgerFormat(text) {
-        // Robust Regex Parsing for Ledger Format
-        // Support both Tabs and Spaces. Handle Symbols with spaces.
-        // Anchors: Exch ... Type(D/T) Side(B/S) ...
-
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
         const trades = [];
-
-        // Regex Explanation:
-        // ^(NSE|BSE)       Group 1: Exchange
-        // \s+              Whitespace
-        // (\S+)            Group 2: Date (non-whitespace)
-        // \s+              Whitespace
-        // (.+?)            Group 3: Symbol (Lazy match until next group)
-        // \s+              Whitespace
-        // ([DT])           Group 4: Type (D or T)
-        // \s+              Whitespace
-        // ([BS])           Group 5: Side (B or S)
-        // \s+              Whitespace
-        // ([\d.,]+)        Group 6: Qty
-        // \s+              Whitespace
-        // ([\d.,]+)        Group 7: Price
-        // \s+              Whitespace
-        // (?:[\d.,]+)      Non-capturing: Intermediate col (Col 7 in sample)
-        // \s+              Whitespace
-        // ([\d.,]+)        Group 8: Net Rate (Col 8 in sample) - Optional capture
         const pattern = /^(NSE|BSE)\s+(\S+)\s+(.+?)\s+([DT])\s+([BS])\s+([\d.,]+)\s+([\d.,]+)(?:\s+[\d.,]+)?\s+([\d.,]+)/i;
 
         for (const line of lines) {
-            // Heuristic: Must start with NSE or BSE
             if (!line.startsWith('NSE') && !line.startsWith('BSE')) continue;
 
             const match = line.match(pattern);
-            if (!match) {
-                // Fallback for lines that might be simpler or header-like?
-                // If it doesn't match the D/B pattern, maybe it's not a trade line.
-                continue;
-            }
+            if (!match) continue;
 
             try {
                 const exch = match[1];
@@ -230,25 +246,21 @@ class DataHandler {
                 const qty = parseFloat(match[6].replace(/,/g, ''));
                 const price = parseFloat(match[7].replace(/,/g, ''));
 
-                // Net Rate (Group 8)
                 let netRate = price;
                 if (match[8]) {
                     netRate = parseFloat(match[8].replace(/,/g, ''));
                     if (isNaN(netRate)) netRate = price;
                 }
 
-                // implicit costs calculation
                 let expenses = null;
-                // If we found a valid Net Rate different from 0
                 if (match[8]) {
                     if (sideCode === 'B') {
                         expenses = Math.max(0, netRate - price);
                     } else {
                         expenses = Math.max(0, price - netRate);
                     }
-                    if (expenses < 0.01) expenses = null; // Treat ~0 or 0 expenses as null to trigger estimation
+                    if (expenses < 0.01) expenses = null;
                 }
-                // Safety check
                 if (isNaN(qty) || isNaN(price)) continue;
 
                 trades.push({
@@ -270,29 +282,24 @@ class DataHandler {
     }
 
     static parseVerticalBlocks(text) {
-        // Legacy vertical block format
-        // Expecting specific sequence like: Exch, Date, Symbol, Type, Side, Qty, Price...
-
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
         const trades = [];
 
-        // We look for the "Exchange" keyword (NSE/BSE) to start a block
         let i = 0;
         while (i < lines.length) {
             const line = lines[i];
             if (line === 'NSE' || line === 'BSE') {
                 if (i + 6 < lines.length) {
                     try {
-                        const date = lines[i + 1];    // 06/10/2025
-                        const symbol = lines[i + 2];  // ICICIBANK
-                        const typeCode = lines[i + 3]; // D or T
-                        const sideCode = lines[i + 4]; // B or S
-                        const qty = parseFloat(lines[i + 5]);     // 250
-                        const price = parseFloat(lines[i + 6]);   // 1363.40
+                        const date = lines[i + 1];
+                        const symbol = lines[i + 2];
+                        const typeCode = lines[i + 3];
+                        const sideCode = lines[i + 4];
+                        const qty = parseFloat(lines[i + 5]);
+                        const price = parseFloat(lines[i + 6]);
 
                         let expenses = null;
                         let netPrice = price;
-                        // Try to peek ahead for Net Rate (i+8)
                         if (lines[i + 8] && !isNaN(parseFloat(lines[i + 8]))) {
                             netPrice = parseFloat(lines[i + 8]);
                             if (sideCode === 'B') {
@@ -309,11 +316,11 @@ class DataHandler {
                             side: sideCode === 'B' ? 'BUY' : 'SELL',
                             qty: qty,
                             price: price,
-                            expenses: expenses, // Per share expense from file
+                            expenses: expenses,
                             orderType: typeCode === 'D' ? 'MTF' : 'MIS'
                         });
 
-                        i += 7; // Advance
+                        i += 7;
                     } catch (e) {
                         console.warn("Failed to parse block at line " + i, e);
                         i++;
@@ -329,37 +336,27 @@ class DataHandler {
         return trades;
     }
 
-    // Live Price Integration
     static async fetchPrice(symbol, { marketOpen = false } = {}) {
         try {
-            // Yahoo Finance API via AllOrigins Proxy (to bypass CORS on file://)
             const ySymbol = `${symbol}.NS`;
             const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ySymbol}?interval=1d&range=1d`;
-
-            // Proxy URL - This wraps the request so the browser sees a request to allorigins.win (CORS friendly)
             const url = `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`;
 
             const response = await fetch(url);
-
             if (!response.ok) throw new Error("Network response was not ok");
 
             const proxyData = await response.json();
-            // AllOrigins returns the actual response in 'contents' field as a string
             const data = JSON.parse(proxyData.contents);
 
-            // Validate structure
             if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
                 console.warn(`Yahoo API: No data for ${ySymbol}`);
                 return null;
             }
 
             const meta = data.chart.result[0].meta;
-
-            // Yahoo Meta Fields: regularMarketPrice, previousClose, regularMarketOpen
             const currentPrice = meta.regularMarketPrice;
             const prevClose = meta.previousClose;
 
-            // Decide source based on market status
             if (marketOpen) {
                 return { price: currentPrice || prevClose || 0, source: 'regularMarketPrice' };
             }

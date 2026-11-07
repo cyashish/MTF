@@ -45,22 +45,27 @@ B
 250..."></textarea>
                 </div>
 
-                <div class="flex" style="align-items: center;">
-                    <button id="btnProcess">
+                <div class="flex" style="align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <input type="file" id="mainFileInput" accept=".csv,.txt,.xlsx,.xls" style="display: none;">
+                    <button id="btnUploadMain" style="display: flex; align-items: center; gap: 6px;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+                        Upload Excel / CSV
+                    </button>
+                    <button id="btnProcess" class="secondary">
                         <span id="loadingSpinner" class="loading hidden"></span>
-                        Process Trades
+                        Process Pasted Trades
                     </button>
                     <span id="statusMsg" class="text-sm text-muted" style="margin-left: auto;"></span>
                 </div>
 
                 <div class="flex" style="align-items: center; justify-content: space-between; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <button id="btnStoreOld" class="secondary" style="font-size: 0.85rem;">Store Input as Old</button>
-                        <span class="text-sm text-muted" style="font-size: 0.75rem;">OR</span>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="text-sm text-muted" style="font-weight: 500;">Historical Data:</span>
+                        <button id="btnStoreOld" class="secondary" style="font-size: 0.85rem;">Store Pasted as Old</button>
                         <input type="file" id="oldDataFile" accept=".csv,.txt,.xlsx,.xls" style="display: none;">
                         <button id="btnUploadOld" class="secondary" style="font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
                             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
-                            Upload CSV/Excel
+                            Upload Old File
                         </button>
                         <button id="btnClearOld" class="secondary" style="font-size: 0.85rem; margin-left: 0.5rem; color: #ef4444; border-color: #fca5a5;">Clear Old</button>
                     </div>
@@ -81,13 +86,13 @@ B
                     <div class="grid">
                         <div class="input-group">
                             <label class="text-sm text-muted">Funding Ratio (Loan %)</label>
-                            <input type="range" id="fundingRatio" min="0" max="1" step="0.05" value="1"
+                            <input type="range" id="fundingRatio" min="0" max="1" step="0.05" value="0.75"
                                 oninput="document.getElementById('fundVal').innerText = (this.value*100) + '%'; APP.recalculate()"
                                 style="width: 100%; margin-top: 0.5rem; accent-color: var(--accent-primary);">
                             <div style="display: flex; justify-content: space-between;">
                                 <span class="text-sm">0%</span>
                                 <span id="fundVal" class="text-sm"
-                                    style="color: var(--accent-primary); font-weight: bold;">100%</span>
+                                    style="color: var(--accent-primary); font-weight: bold;">75%</span>
                             </div>
                             <p class="text-sm text-muted" style="margin-top: 0.25rem; font-size: 0.8rem;">Reduce if you
                                 paid cash.</p>
@@ -173,7 +178,12 @@ B
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="xlsx.full.min.js"></script>
+    <script>
+        if (typeof XLSX === "undefined") {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');
+        }
+    </script>
     <script src="config.js"></script>
     <script src="calculator.js"></script>
     <script src="dataHandler.js"></script>
