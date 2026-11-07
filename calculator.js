@@ -13,11 +13,16 @@ class Calculator {
             // Normalize separators: replace - and . with /
             clean = clean.replace(/[-.]/g, '/');
 
-            // Handle DD/MM/YYYY
+            // Handle DD/MM/YYYY and ISO-style YYYY-MM-DD dates
             if (clean.includes('/')) {
                 const parts = clean.split('/');
                 if (parts.length === 3) {
-                    let [d, m, y] = parts;
+                    let d, m, y;
+                    if (parts[0].length === 4) {
+                        [y, m, d] = parts;
+                    } else {
+                        [d, m, y] = parts;
+                    }
                     // Handle 2-digit year
                     if (y.length === 2) y = '20' + y;
                     return new Date(`${y}-${m}-${d}`);
